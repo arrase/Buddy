@@ -1,0 +1,6 @@
+langchain
+langgraph
+langchain_community
+google-generativeai
+rich
+langchain-google-genai
