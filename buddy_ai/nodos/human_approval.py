@@ -3,9 +3,7 @@ from rich.markdown import Markdown
 
 # Import BuddyGraphState from the __init__.py in the same directory
 from . import BuddyGraphState
-from ..shared_instances import _agent_cli_console
-
-
+# from ..shared_instances import _agent_cli_console # This direct import is removed
 from .. import shared_instances as ha_shared_instances # Use an alias for clarity
 
 def human_approval_node(state: BuddyGraphState) -> dict:
@@ -40,11 +38,11 @@ def human_approval_node(state: BuddyGraphState) -> dict:
         return {"plan_approved": False, "user_feedback": None, "plan": plan}
 
     plan_md = "\n".join(f"{i+1}. {step}" for i, step in enumerate(plan))
-    _agent_cli_console.print(Markdown(f"## Proposed Execution Plan:\n{plan_md}"))
+    ha_shared_instances._agent_cli_console.print(Markdown(f"## Proposed Execution Plan:\n{plan_md}"))
 
     while True:  # Loop until valid input (A, R, C) is received
         try:
-            raw_input = _agent_cli_console.input("[bold yellow]Plan Review[/bold yellow]: ([bold green]A[/bold green])pprove, ([bold blue]R[/bold blue])efine, or ([bold red]C[/bold red])ancel plan? ").strip().lower()
+            raw_input = ha_shared_instances._agent_cli_console.input("[bold yellow]Plan Review[/bold yellow]: ([bold green]A[/bold green])pprove, ([bold blue]R[/bold blue])efine, or ([bold red]C[/bold red])ancel plan? ").strip().lower()
         except KeyboardInterrupt: # Treat Ctrl+C as cancel
             logging.warning("User cancelled via KeyboardInterrupt during plan approval.")
             raw_input = 'c' # Simulate cancel input
@@ -58,15 +56,15 @@ def human_approval_node(state: BuddyGraphState) -> dict:
             logging.info("User chose to refine the plan.")
             while True: # Loop for getting refinement feedback
                 try:
-                    feedback = _agent_cli_console.input("Please provide feedback for replanning: ").strip()
+                    feedback = ha_shared_instances._agent_cli_console.input("Please provide feedback for replanning: ").strip()
                     if feedback:
                         current_user_feedback = feedback
                         current_plan_approved = False # Plan is not approved if feedback is given
                         break
                     else:
-                        _agent_cli_console.print("[bold red]Feedback cannot be empty if you choose to refine. Please provide your comments or (C)ancel refinement.[/bold red]")
+                        ha_shared_instances._agent_cli_console.print("[bold red]Feedback cannot be empty if you choose to refine. Please provide your comments or (C)ancel refinement.[/bold red]")
                         # Allow user to cancel out of refinement feedback loop
-                        sub_choice = _agent_cli_console.input("Enter feedback or (C)ancel refinement: ").strip().lower()
+                        sub_choice = ha_shared_instances._agent_cli_console.input("Enter feedback or (C)ancel refinement: ").strip().lower()
                         if sub_choice == 'c':
                             current_user_feedback = None # Ensure feedback is None if refinement is cancelled
                             break # Exits refinement feedback loop, re-prompts A/R/C
@@ -85,7 +83,7 @@ def human_approval_node(state: BuddyGraphState) -> dict:
             break
         else:
             logging.debug("Invalid input from user during plan approval.")
-            _agent_cli_console.print("[bold red]Invalid input. Please enter 'A', 'R', or 'C'.[/bold red]")
+            ha_shared_instances._agent_cli_console.print("[bold red]Invalid input. Please enter 'A', 'R', or 'C'.[/bold red]")
 
     # Log final decision from this node
     if current_plan_approved:
