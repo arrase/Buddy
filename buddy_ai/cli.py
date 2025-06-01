@@ -21,9 +21,9 @@ cli_console = Console()
 def setup_logging():
     # It's good practice to ensure os is imported if using os.getenv
     # import os
-    log_level_str = os.getenv("BUDDY_LOG_LEVEL", "INFO").upper()
+    log_level_str = os.getenv("BUDDY_LOG_LEVEL", "WARNING").upper()
     logging.basicConfig(
-        level=getattr(logging, log_level_str, logging.INFO),
+        level=getattr(logging, log_level_str, logging.WARNING),
         format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
@@ -31,6 +31,7 @@ def setup_logging():
 
 def main():
     setup_logging()
+    logging.debug("Debug logging test message.")
     parser = argparse.ArgumentParser(description="Buddy AI Agent CLI - Your AI assistant for various tasks.")
     parser.add_argument("--prompt", type=str, required=True,
                         help="User objective, instructions, or a path to a text file containing them.")

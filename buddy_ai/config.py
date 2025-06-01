@@ -2,7 +2,7 @@ import os
 import configparser
 import logging
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s")
+# logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s") # Commented out: Logging is configured in cli.py
 
 def load_app_config():
     config = configparser.ConfigParser()
