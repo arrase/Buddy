@@ -1,7 +1,9 @@
 langchain-google-genai
 langchain-community
 langgraph
-pydantic
-langchain-core
 rich
+pydantic
+argparse
+configparser
+langchain-core
 langchain-experimental

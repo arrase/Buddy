@@ -1,4 +1,5 @@
 import os
+import configparser
 import argparse
 import pathlib
 from typing import TypedDict, List, Optional, Annotated
@@ -31,15 +32,23 @@ logging.basicConfig(
 # --- Rich Console Initialization ---
 console = Console()
 
-# --- API Key Configuration ---
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+# --- Configuration Loading ---
+config = configparser.ConfigParser()
+config.read('config.ini')
+
+GOOGLE_API_KEY = config.get('AISTUDIO', 'api_key', fallback=None)
 if not GOOGLE_API_KEY:
-    logging.error("GOOGLE_API_KEY not found in environment. The application will likely fail.")
-    # Let the program continue and fail at LLM instantiation, which will provide a clear error.
+    logging.error("GOOGLE_API_KEY not found in config.ini [AISTUDIO]. The application will likely fail.")
+    # Let the program continue and fail at LLM instantiation.
 else:
     os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY # Ensure it's set for langchain
-    logging.info("GOOGLE_API_KEY found and set in environment.")
+    logging.info("GOOGLE_API_KEY loaded from config.ini and set in environment.")
 
+PLANNER_MODEL = config.get('PLANNER', 'model', fallback='gemini-2.5-flash-preview-04-17')
+EXECUTOR_MODEL = config.get('EXECUTOR', 'model', fallback='gemini-2.5-flash-preview-04-17')
+
+logging.info(f"Using Planner Model: {PLANNER_MODEL}")
+logging.info(f"Using Executor Model: {EXECUTOR_MODEL}")
 logging.info("Buddy AI Agent Initializing...")
 
 def read_file_or_directory(path_str: str) -> str:
@@ -78,13 +87,13 @@ def read_file_or_directory(path_str: str) -> str:
     return "\n\n".join(content_parts)
 
 
-def create_llm_instance(model_name_primary: str, llm_type: str):
+def create_llm_instance(model_name: str, llm_type: str):
     try:
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0)
-        logging.info(f"{llm_type} LLM created successfully using gemini-1.5-flash-preview-04-17.")
+        llm = ChatGoogleGenerativeAI(model=model_name, temperature=0)
+        logging.info(f"{llm_type} LLM created successfully using {model_name}.")
         return llm
     except Exception as e:
-        logging.error(f"Error creating {llm_type} LLM with gemini-1.5-flash-preview-04-17: {e}", exc_info=True)
+        logging.error(f"Error creating {llm_type} LLM with {model_name}: {e}", exc_info=True)
         return None
 
 def create_executor_agent_runnable(llm):
@@ -276,7 +285,7 @@ if __name__ == "__main__":
         console.print(Markdown("--- \n*No context provided.*"))
 
     logging.info("Initializing LLMs and Agent...")
-    planner_llm_instance = create_llm_instance("gemini-2.5-flash-preview-04-17", "Planner")
+    planner_llm_instance = create_llm_instance(PLANNER_MODEL, "Planner")
     if not planner_llm_instance:
         console.print(Markdown("**CRITICAL ERROR:** Planner LLM failed to initialize. Buddy cannot proceed."))
         exit("CRITICAL: Planner LLM could not be initialized. Exiting.")
@@ -288,7 +297,7 @@ if __name__ == "__main__":
         console.print(Markdown("**CRITICAL ERROR:** Failed to configure planner. Buddy cannot proceed."))
         exit(1)
 
-    executor_llm_instance = create_llm_instance("gemini-2.5-flash-preview-04-17", "Executor")
+    executor_llm_instance = create_llm_instance(EXECUTOR_MODEL, "Executor")
     if not executor_llm_instance:
         console.print(Markdown("**CRITICAL ERROR:** Executor LLM failed to initialize. Buddy cannot proceed."))
         exit("CRITICAL: Executor LLM could not be initialized. Exiting.")
