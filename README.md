@@ -1,47 +1,93 @@
-# Buddy
+# Buddy AI Agent
 
-1. Buddy es un agente de IA implementado con la librería LangGraph de python
-2. El objetivo de Buddy es ayudar al usuario en tareas de administracion de sistemas y de desarrollo de software
-3. Usa esta clave de API para Google AI Studio: AIzaSyAAfE6ydHeGx9-VVVVMbBLcMrB8QtGdpfE
-4. Implementa la arquitectura plan-and-execute explicada en este documento: https://langchain-ai.github.io/langgraph/tutorials/plan-and-execute/plan-and-execute/#create-the-graph
-5. Usa el modelo gemini-2.5-flash-preview-04-17 para la planificacion de tareas
-6. Usa ChatGoogleGenerativeAI para implementar la planificacion de tareas
-7. Usa el modelo gemini-2.5-flash-preview-05-20 para la ejecucion de tareas
-8. El llm encargado de ejecutar las tareas usa la Tool de langgraph llamada ShellTool, este es un ejemplo de como añadir esa ShellTool a un agente:
+Buddy AI is an intelligent agent built using [LangGraph](https://langchain-ai.github.io/langgraph/), designed to assist with system administration and software development tasks. It interprets user objectives, formulates plans, and executes them by interacting with the system environment.
 
-```python
-from langchain_community.tools import ShellTool
+## Core Functionality
 
-agent = create_react_agent(
-    model=get_llm(config),
-    tools=[ShellTool()],
-    prompt=system_prompt,
-    checkpointer=InMemorySaver(),
-)
-```
-9. El agente ejecutor es una agente ReAct implementado con la funcion create_react_agent
-10. La salida al usuario debe estar formateada con rich.Markdown para mejorar la experiencia del usuario
-11. El codigo debe ser limpio, compacto y legible
-12. La aplicacion tiene un parametro --prompt que son las instrucciones del usuario para el agente, este parametro puede ser una string o un fichero del que lee las instrucciones
-13. La aplicacion tiene un paremetro --context que es informacion que se carga en el contexto para poder realizar su trabajo, pude ser un fichero del que lee su contenido o un directorio que del que lee recursivamente todos los ficheros de texto
-14. Ejemplos de llamadas que puede resolver el agente:
+Buddy AI employs a plan-and-execute architecture, cycling through stages of planning, user approval, execution, and replanning as needed. The core of its functionality is managed by several key nodes within its LangGraph structure:
+
+*   **Planner:** This node is responsible for interpreting the user's objective and any provided context (files or directory contents). It generates an initial step-by-step plan, outlining the actions required to achieve the objective.
+*   **Human Approval:** Before execution, the proposed plan is presented to the user. This node allows the user to:
+    *   Approve the plan for execution.
+    *   Request refinements if the plan is not satisfactory.
+    *   Cancel the process if the plan is unachievable or incorrect.
+*   **Executor:** Once a plan is approved, the executor takes over. It processes each step of the plan sequentially. For steps involving system interaction, it utilizes a `ShellTool` to run shell commands. This allows the agent to perform a wide range of tasks, such as file manipulation, code compilation, running scripts, and interacting with version control systems.
+*   **Replanner:** If the user requests changes to the plan during the approval stage, or if the executor encounters errors or situations that necessitate a change in strategy, the replanner node is invoked. It takes the existing plan and user feedback (or execution results) to generate a revised plan.
+*   **Deciders:** These are conditional logic nodes that control the flow of execution within the graph. Based on the outcome of previous nodes (e.g., plan approval status, execution success/failure), deciders route the process to the appropriate next step, such as proceeding with execution, moving to replanning, or terminating the workflow.
+
+## Command-Line Usage
+
+Buddy AI is run from the command line using the `buddy_ai.cli` module.
 
 ```bash
-buddy --context . --prompt "analiza el proyecto y añade una opcion para listar ficheros, crea una bateria de test end-to-end y ejecutala para ver si funciona, si no funciona arregla los fallos y vuelve a intentarlo"
-buddy --context file.py --prompt "mejora la sintaxis del fichero, al terminar ejecutalo para ver si funciona"
-buddy --prompt "crea una app en golang, que imprima el contenido de la url https://google.com, compilalo y asegurate de que se ejecuta correctamente"
+python -m buddy_ai.cli [arguments]
 ```
 
-## Code Structure
+### Accepted Arguments:
 
-The codebase was recently refactored to improve modularity and resolve import issues. Here's a brief overview:
+*   `--prompt <string_or_filepath>`: **(Required)** This argument specifies the user's objective or the instructions for the agent. It can be provided as a direct string on the command line or as a path to a text file containing the objective.
+*   `--context <filepath_or_directorypath>`: **(Optional)** This argument allows you to provide contextual information to the agent. You can specify a path to a single file or a directory. If a directory path is given, Buddy AI will recursively read all text-based files within that directory to use as context for planning.
+*   `--auto`: **(Optional)** When this flag is present, it enables auto-mode. In auto-mode, the initial plan generated by the Planner is automatically approved, bypassing the Human Approval step. This is useful for trusted tasks or when running the agent in a non-interactive environment.
 
--   **Core Agent Logic**: The main LangGraph definition, state management, and core functions like LLM/agent runnable setup are located in `buddy_ai/agent.py`.
--   **Graph Nodes**: Individual nodes that form the LangGraph (e.g., planner, executor, replanner, human approval, deciders) have been separated into their own modules within the `buddy_ai/nodos/` directory. For example:
-    -   `buddy_ai/nodos/planner.py`
-    -   `buddy_ai/nodos/executor.py`
-    -   `buddy_ai/nodos/replanner.py`
-    -   `buddy_ai/nodos/human_approval.py`
-    -   `buddy_ai/nodos/deciders.py`
--   **Shared Instances**: To manage objects that need to be globally accessible by different parts of the agent (like configured LLM instances or the Rich console object) and to prevent circular dependencies, a dedicated module `buddy_ai/shared_instances.py` is used. These objects are initialized by `agent.py` (or `__main__.py`) and stored in `shared_instances.py`, from where nodes can import them directly.
--   **Command-Line Interface**: The entry point for the CLI (`python -m buddy_ai ...`) is now `buddy_ai/__main__.py`. This file handles argument parsing, configuration loading, and invoking the main agent workflow. The previous `buddy_ai/cli.py` has been removed.
+## Usage Examples
+
+Here are a few examples of how to use Buddy AI:
+
+```bash
+# Example 1: Analyze the project, add a feature, test, and fix
+python -m buddy_ai.cli --context . --prompt "Analyze this project, add an option to list files, create end-to-end tests for it, and run them. If they fail, fix the issues and try again."
+
+# Example 2: Improve a Python script and run it
+python -m buddy_ai.cli --context my_script.py --prompt "Improve the syntax of this Python script and then run it to ensure it works."
+
+# Example 3: Create and compile a Go application
+python -m buddy_ai.cli --prompt "Create a Go application that prints the content of https://google.com. Compile it and ensure it executes correctly."
+```
+
+## Application Structure
+
+The Buddy AI project is organized as follows:
+
+*   `buddy_ai/`: The main Python package directory.
+    *   `agent.py`: Defines the LangGraph state machine, including nodes, edges, and conditional logic that constitute the core agent.
+    *   `cli.py`: Provides the command-line interface for interacting with the agent. It handles argument parsing, loading configurations, and invoking the agent workflow.
+    *   `nodes/`: This directory contains individual Python modules for each main node in the graph:
+        *   `planner.py`: Logic for the Planner node.
+        *   `human_approval.py`: Logic for the Human Approval node.
+        *   `executor.py`: Logic for the Executor node.
+        *   `replanner.py`: Logic for the Replanner node.
+        *   `deciders.py`: Logic for conditional decider nodes.
+    *   `shared_instances.py`: A module for managing globally shared objects, such as LLM instances and the Rich console, ensuring they are consistently accessed across the application.
+    *   `config.py`: Responsible for loading application configurations, like API keys and model names, from the `config.ini` file.
+    *   `utils.py`: Contains various utility functions used throughout the application.
+*   `config.ini`: The configuration file where API keys for services like Google Generative AI and preferred model names are stored.
+*   `requirements.txt`: A standard Python file listing all the dependencies required to run Buddy AI.
+*   `setup.py`: The Python project setup script used for packaging and distribution.
+*   `graph.png`: A visual representation of the agent's execution graph structure, showing the flow between different nodes.
+*   `README.md`: This file, providing documentation for the Buddy AI agent.
+
+## Execution Flow
+
+The typical execution flow of the Buddy AI agent is as follows:
+
+1.  **Initialization:** The `cli.py` script parses command-line arguments, loads configurations from `config.ini`, and initializes the necessary LLM instances.
+2.  **Planning:** The process starts with the `planner` node. It takes the user's objective and any provided context to generate a multi-step plan.
+3.  **Human Approval:** The generated plan is then passed to the `human_approval` node.
+    *   If `--auto` mode is enabled, the plan is automatically approved.
+    *   Otherwise, the user is prompted to review the plan. They can approve it, suggest refinements (which sends the process to the `replanner`), or cancel.
+4.  **Execution:** If the plan is approved, it moves to the `executor` node.
+    *   The `executor` processes each step of the plan. For tasks requiring system interaction, it uses a `ShellTool`.
+    *   After each step (or a sequence of steps, depending on the plan's granularity), the `should_continue_decider` node is invoked.
+5.  **Decision & Continuation:** The `should_continue_decider` evaluates the outcome of the executed step(s):
+    *   If the step was successful and more steps remain, it routes back to the `executor` for the next step.
+    *   If the objective is deemed achieved, the process moves to `END`.
+    *   If an error occurs or the step's outcome suggests the current plan is no longer viable, it may route to the `replanner`.
+    *   If a critical error occurs that cannot be recovered from, it also moves to `END`.
+6.  **Replanning:** If the `replanner` node is invoked (either due to user feedback or executor issues):
+    *   It revises the plan based on the new information.
+    *   The revised plan is then sent back to the `human_approval` node to restart the review cycle.
+7.  **Looping and Termination:** The agent continues to loop through the approval, execution, and replanning phases as necessary until the objective is successfully met or the process is explicitly cancelled or encounters a critical, unrecoverable error.
+
+This flow is visually represented by the agent's graph structure:
+
+![Agent Execution Graph](graph.png)
