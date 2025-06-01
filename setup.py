@@ -17,7 +17,7 @@ setup(
     install_requires=requirements,
     entry_points={
         'console_scripts': [
-            'buddyai=buddy_agent.cli.main:main',
+            'buddyai=buddy_agent.main:main',
         ],
     },
     classifiers=[
