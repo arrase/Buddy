@@ -1,0 +1,8 @@
+.idx/
+.vscode/
+**/.env
+**/.venv
+**/__pycache__
+**/dist
+**/build
+**/*.egg-info
