@@ -15,12 +15,22 @@ Buddy AI employs a plan-and-execute architecture, cycling through stages of plan
 *   **Replanner:** If the user requests changes to the plan during the approval stage, or if the executor encounters errors or situations that necessitate a change in strategy, the replanner node is invoked. It takes the existing plan and user feedback (or execution results) to generate a revised plan.
 *   **Deciders:** These are conditional logic nodes that control the flow of execution within the graph. Based on the outcome of previous nodes (e.g., plan approval status, execution success/failure), deciders route the process to the appropriate next step, such as proceeding with execution, moving to replanning, or terminating the workflow.
 
+## Development
+
+```bash
+git clone git@github.com:arrase/Buddy.git
+cd Buddy
+python3 -m venv .venv
+source .venv/bin/activate
+pip3 install -e .
+```
+
 ## Command-Line Usage
 
 Buddy AI is run from the command line using the `buddy_ai.cli` module.
 
 ```bash
-python -m buddy_ai.cli [arguments]
+buddy [arguments]
 ```
 
 ### Accepted Arguments:
@@ -35,13 +45,13 @@ Here are a few examples of how to use Buddy AI:
 
 ```bash
 # Example 1: Analyze the project, add a feature, test, and fix
-python -m buddy_ai.cli --context . --prompt "Analyze this project, add an option to list files, create end-to-end tests for it, and run them. If they fail, fix the issues and try again."
+buddy --context . --prompt "Analyze this project, add an option to list files, create end-to-end tests for it, and run them. If they fail, fix the issues and try again."
 
 # Example 2: Improve a Python script and run it
-python -m buddy_ai.cli --context my_script.py --prompt "Improve the syntax of this Python script and then run it to ensure it works."
+buddy --context my_script.py --prompt "Improve the syntax of this Python script and then run it to ensure it works."
 
 # Example 3: Create and compile a Go application
-python -m buddy_ai.cli --prompt "Create a Go application that prints the content of https://google.com. Compile it and ensure it executes correctly."
+buddy --prompt "Create a Go application that prints the content of https://google.com. Compile it and ensure it executes correctly."
 ```
 
 ## Application Structure

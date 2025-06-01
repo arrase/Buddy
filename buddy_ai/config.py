@@ -1,4 +1,5 @@
 import os
+import sys
 import configparser
 import logging
 
@@ -19,23 +20,10 @@ def load_app_config():
     planner_model_name = config.get("PLANNER", "model", fallback="gemini-1.5-flash-latest")
     executor_model_name = config.get("EXECUTOR", "model", fallback="gemini-1.5-flash-latest")
 
-    if not api_key:
+    if not api_key or api_key == "YOUR_API_KEY_HERE":
         logging.error(f"API key not found in '{config_path}' under [AISTUDIO] section.")
-    else:
-        os.environ["GOOGLE_API_KEY"] = api_key
-        logging.info("Google API key loaded from config and set in environment.")
+        sys.exit("Error: API key is required. Please set it in the configuration file.")
 
     logging.info(f"Planner model: {planner_model_name}, Executor model: {executor_model_name}")
 
     return api_key, planner_model_name, executor_model_name
-
-if __name__ == '__main__':
-    logging.info("Attempting to load configuration...")
-    key, planner_model, executor_model = load_app_config()
-    if key:
-        logging.info("Config loaded successfully.")
-        logging.info(f"API Key Present: {'Yes' if key else 'No'}")
-        logging.info(f"Planner Model: {planner_model}")
-        logging.info(f"Executor Model: {executor_model}")
-    else:
-        logging.error("Failed to load configuration.")
