@@ -88,11 +88,8 @@ def create_llm_instance(model_name_primary: str, llm_type: str):
         return None
 
 def create_executor_agent_runnable(llm):
-    if not llm: return None
-    shell_tool = ShellTool()
-    tools = [shell_tool]
     try:
-        executor_agent = create_react_agent(llm, tools=tools)
+        executor_agent = create_react_agent(llm, tools=[ShellTool()])
         logging.info("Executor ReAct agent created successfully with ShellTool.")
         return executor_agent
     except Exception as e:
@@ -101,7 +98,7 @@ def create_executor_agent_runnable(llm):
 
 class Plan(BaseModel):
     # No docstring here to avoid parsing issues
-    steps: List[str] = Field(description="Actionable steps for the executor.") # Simplified description
+    steps: List[str] = Field(description="Actionable steps for the executor.")
 
 class BuddyGraphState(TypedDict):
     objective: str
