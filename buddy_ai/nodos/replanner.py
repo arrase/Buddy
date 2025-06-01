@@ -1,9 +1,9 @@
 import logging
 
 from . import BuddyGraphState
-from .planner import Plan  # Assuming Plan is in planner.py
-# Import the global variable from the original agent module
-from ..agent import _planner_llm_structured
+from .planner import Plan
+from .. import shared_instances as replanner_shared_instances # Alias for clarity
+# from ..shared_instances import _planner_llm_structured
 
 
 _REPLANNER_PROMPT_TEMPLATE = (
@@ -36,10 +36,8 @@ def replanner_node(state: BuddyGraphState) -> dict:
     step_results = state.get("step_results", [])
     context = state.get("context", "")
 
-    # Access the globally defined _planner_llm_structured
-    global _planner_llm_structured
-    if not _planner_llm_structured:
-        logging.error("Replanner Node: Planner LLM (_planner_llm_structured) is not initialized.")
+    if not replanner_shared_instances._planner_llm_structured:
+        logging.error("Replanner Node: Planner LLM (_planner_llm_structured from shared_instances) is not initialized.")
         return {"plan": ["Critical Error: Planner LLM not initialized for replanning."], "current_step_index": 0, "step_results": []}
 
     previous_plan_str = "\n".join(f"- {s}" for s in previous_plan)
@@ -56,7 +54,7 @@ def replanner_node(state: BuddyGraphState) -> dict:
 
     new_plan_steps = ["Critical Error: Replanner failed to generate a new plan."]
     try:
-        ai_response = _planner_llm_structured.invoke(formatted_prompt)
+        ai_response = replanner_shared_instances._planner_llm_structured.invoke(formatted_prompt)
         if ai_response and isinstance(ai_response, Plan) and ai_response.steps:
             new_plan_steps = ai_response.steps
             if not all(isinstance(step, str) for step in new_plan_steps):

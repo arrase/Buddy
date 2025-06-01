@@ -23,11 +23,9 @@ from .nodos.human_approval import human_approval_node
 from .nodos.deciders import should_continue_decider, decide_after_approval
 # Assessment is defined and used within deciders.py, not directly needed in agent.py's global scope.
 
-# Global variables remain, to be initialized by functions
-_planner_llm_structured: Optional[ChatGoogleGenerativeAI] = None
-_executor_agent_runnable_global: Optional[Callable] = None
-_assessor_llm_global: Optional[ChatGoogleGenerativeAI] = None
-_agent_cli_console: Optional[Console] = None
+# Global-like variables are now managed in shared_instances.py
+# No global declarations here anymore.
+from . import shared_instances
 
 
 # Functions that are NOT nodes remain in agent.py
@@ -53,19 +51,23 @@ def create_executor_agent_runnable(llm: ChatGoogleGenerativeAI) -> Optional[Call
 
 
 def set_global_llms_and_agents(planner_llm: ChatGoogleGenerativeAI, executor_agent: Callable):
-    global _planner_llm_structured, _executor_agent_runnable_global, _assessor_llm_global
+    # from . import shared_instances # Already imported at module level
     try:
         # Plan is now imported from .nodos.planner
-        _planner_llm_structured = planner_llm.with_structured_output(Plan)
-        logging.info("Global planner LLM configured for structured output (Plan).")
+        logging.info(f"AGENT (set_globals): shared_instances module ID: {id(shared_instances)}")
+        shared_instances._planner_llm_structured = planner_llm.with_structured_output(Plan)
+        logging.info(f"AGENT (set_globals): _planner_llm_structured ID: {id(shared_instances._planner_llm_structured)}")
+        logging.info("Global planner LLM configured for structured output (Plan) in shared_instances.")
     except Exception as e:
         logging.error(f"CRITICAL: Failed to configure global planner LLM for structured output: {e}", exc_info=True)
         raise
-    _executor_agent_runnable_global = executor_agent
+    shared_instances._executor_agent_runnable_global = executor_agent
+    logging.info(f"AGENT (set_globals): _executor_agent_runnable_global ID: {id(shared_instances._executor_agent_runnable_global)}")
     # _assessor_llm_global is the same base LLM as planner, used by should_continue_decider.
     # should_continue_decider (in deciders.py) will call .with_structured_output(Assessment) on it.
-    _assessor_llm_global = planner_llm
-    logging.info("Global executor agent runnable and assessor LLM set.")
+    shared_instances._assessor_llm_global = planner_llm
+    logging.info(f"AGENT (set_globals): _assessor_llm_global ID: {id(shared_instances._assessor_llm_global)}")
+    logging.info("Global executor agent runnable and assessor LLM set in shared_instances.")
 
 
 def create_buddy_graph() -> StateGraph:
@@ -113,6 +115,8 @@ def create_buddy_graph() -> StateGraph:
 
 
 def set_agent_console(console: Console):
-    global _agent_cli_console
-    _agent_cli_console = console
-    logging.info("Agent CLI console set.")
+    # from . import shared_instances # Already imported at module level
+    logging.info(f"AGENT: shared_instances module ID: {id(shared_instances)}")
+    shared_instances._agent_cli_console = console
+    logging.info(f"AGENT: Setting console in shared_instances: {id(shared_instances._agent_cli_console)}")
+    logging.info("Agent CLI console set in shared_instances.")

@@ -3,18 +3,18 @@ from langchain_core.messages import HumanMessage
 
 # Import BuddyGraphState from the __init__.py in the same directory
 from . import BuddyGraphState
-# Import the global variable from the original agent module
-from ..agent import _executor_agent_runnable_global
+from .. import shared_instances as executor_shared_instances # Alias for clarity
+# from ..shared_instances import _executor_agent_runnable_global
 
 
 def executor_node(state: BuddyGraphState) -> dict:
     current_idx = state.get("current_step_index", 0)
     logging.info(f"Entering executor_node for step index {current_idx}.")
+    logging.info(f"EXECUTOR: shared_instances module ID: {id(executor_shared_instances)}")
+    logging.info(f"EXECUTOR: _executor_agent_runnable_global ID from shared_instances: {id(executor_shared_instances._executor_agent_runnable_global)}")
 
-    # Access the globally defined _executor_agent_runnable_global
-    global _executor_agent_runnable_global
-    if not _executor_agent_runnable_global:
-        logging.error("Executor agent (_executor_agent_runnable_global) is not initialized.")
+    if not executor_shared_instances._executor_agent_runnable_global:
+        logging.error("Executor agent (_executor_agent_runnable_global from shared_instances) is not initialized.")
         return {"step_results": ["Critical Error: Executor agent not initialized."], "current_step_index": current_idx + 1}
 
     plan = state.get("plan")
@@ -31,7 +31,7 @@ def executor_node(state: BuddyGraphState) -> dict:
         logging.info(f"Executing step {current_idx + 1}/{len(plan)}: {current_instruction}")
         try:
             agent_input = {"messages": [HumanMessage(content=current_instruction)]}
-            agent_response = _executor_agent_runnable_global.invoke(agent_input)
+            agent_response = executor_shared_instances._executor_agent_runnable_global.invoke(agent_input)
             logging.debug(f"Raw agent response for step {current_idx + 1}: {agent_response}")
             if agent_response and "messages" in agent_response and agent_response["messages"]:
                 step_output_str = str(agent_response["messages"][-1].content)

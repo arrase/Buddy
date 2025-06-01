@@ -3,17 +3,19 @@ from rich.markdown import Markdown
 
 # Import BuddyGraphState from the __init__.py in the same directory
 from . import BuddyGraphState
-# Import the global variable _agent_cli_console from the original agent module
-from ..agent import _agent_cli_console
+from ..shared_instances import _agent_cli_console
 
+
+from .. import shared_instances as ha_shared_instances # Use an alias for clarity
 
 def human_approval_node(state: BuddyGraphState) -> dict:
     logging.info("Entering human_approval_node.")
+    logging.info(f"HUMAN_APPROVAL: shared_instances module ID: {id(ha_shared_instances)}")
+    logging.info(f"HUMAN_APPROVAL: _agent_cli_console ID from shared_instances: {id(ha_shared_instances._agent_cli_console)}")
 
-    # Access the globally defined _agent_cli_console
-    global _agent_cli_console
-    if _agent_cli_console is None:
-        logging.critical("CRITICAL: Agent CLI console not set in human_approval_node. This should have been set by the CLI.")
+
+    if ha_shared_instances._agent_cli_console is None:
+        logging.critical("CRITICAL: Agent CLI console (_agent_cli_console from shared_instances) not set in human_approval_node. This should have been set by the CLI.")
         # This state indicates a severe setup error. The plan list itself is modified to reflect this.
         return {"plan_approved": False, "user_feedback": "Critical Error: Agent console not configured.", "plan": ["Critical Error: Agent console not configured."]}
 

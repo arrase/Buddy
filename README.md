@@ -31,3 +31,17 @@ buddy --context . --prompt "analiza el proyecto y añade una opcion para listar 
 buddy --context file.py --prompt "mejora la sintaxis del fichero, al terminar ejecutalo para ver si funciona"
 buddy --prompt "crea una app en golang, que imprima el contenido de la url https://google.com, compilalo y asegurate de que se ejecuta correctamente"
 ```
+
+## Code Structure
+
+The codebase was recently refactored to improve modularity and resolve import issues. Here's a brief overview:
+
+-   **Core Agent Logic**: The main LangGraph definition, state management, and core functions like LLM/agent runnable setup are located in `buddy_ai/agent.py`.
+-   **Graph Nodes**: Individual nodes that form the LangGraph (e.g., planner, executor, replanner, human approval, deciders) have been separated into their own modules within the `buddy_ai/nodos/` directory. For example:
+    -   `buddy_ai/nodos/planner.py`
+    -   `buddy_ai/nodos/executor.py`
+    -   `buddy_ai/nodos/replanner.py`
+    -   `buddy_ai/nodos/human_approval.py`
+    -   `buddy_ai/nodos/deciders.py`
+-   **Shared Instances**: To manage objects that need to be globally accessible by different parts of the agent (like configured LLM instances or the Rich console object) and to prevent circular dependencies, a dedicated module `buddy_ai/shared_instances.py` is used. These objects are initialized by `agent.py` (or `__main__.py`) and stored in `shared_instances.py`, from where nodes can import them directly.
+-   **Command-Line Interface**: The entry point for the CLI (`python -m buddy_ai ...`) is now `buddy_ai/__main__.py`. This file handles argument parsing, configuration loading, and invoking the main agent workflow. The previous `buddy_ai/cli.py` has been removed.

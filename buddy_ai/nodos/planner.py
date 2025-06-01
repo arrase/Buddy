@@ -5,8 +5,8 @@ from pydantic import BaseModel, Field
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from . import BuddyGraphState
-# Import the global variable from the original agent module
-from ..agent import _planner_llm_structured
+from .. import shared_instances as planner_shared_instances # Alias for clarity
+# from ..shared_instances import _planner_llm_structured # Imported via alias
 
 
 class Plan(BaseModel):
@@ -40,10 +40,11 @@ def planner_node(state: BuddyGraphState) -> dict:
     objective = state["objective"]
     context = state.get("context", "")
 
-    # Access the globally defined _planner_llm_structured
-    global _planner_llm_structured
-    if not _planner_llm_structured:
-        logging.error("Planner LLM (_planner_llm_structured) is not initialized in planner_node.")
+    logging.info(f"PLANNER: shared_instances module ID: {id(planner_shared_instances)}")
+    logging.info(f"PLANNER: _planner_llm_structured ID from shared_instances: {id(planner_shared_instances._planner_llm_structured)}")
+
+    if not planner_shared_instances._planner_llm_structured:
+        logging.error("Planner LLM (_planner_llm_structured from shared_instances) is not initialized in planner_node.")
         return {"plan": ["Critical Error: Planner LLM not initialized."], "current_step_index": 0, "step_results": []}
 
     formatted_prompt = _PLANNER_PROMPT_TEMPLATE.format(objective=objective, context=context if context else "No context provided.")
@@ -51,7 +52,7 @@ def planner_node(state: BuddyGraphState) -> dict:
 
     plan_steps = ["Critical Error: Planner failed to generate a plan."]
     try:
-        ai_response = _planner_llm_structured.invoke(formatted_prompt)
+        ai_response = planner_shared_instances._planner_llm_structured.invoke(formatted_prompt)
         if ai_response and isinstance(ai_response, Plan) and ai_response.steps:
             plan_steps = ai_response.steps
             if not all(isinstance(step, str) for step in plan_steps):

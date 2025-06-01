@@ -4,8 +4,8 @@ from langgraph.graph import END
 
 # Import BuddyGraphState from the __init__.py in the same directory
 from . import BuddyGraphState
-# Import the global variable from the original agent module
-from ..agent import _assessor_llm_global
+from .. import shared_instances as deciders_shared_instances # Alias for clarity
+# from ..shared_instances import _assessor_llm_global
 
 
 class Assessment(BaseModel):
@@ -56,9 +56,8 @@ def should_continue_decider(state: BuddyGraphState) -> str:
     if current_idx >= len(plan):
         logging.info("Decider: All steps executed. Assessing if objective is met.")
 
-        global _assessor_llm_global
-        if not _assessor_llm_global:
-            logging.error("Decider: Assessor LLM not initialized. Cannot assess objective.")
+        if not deciders_shared_instances._assessor_llm_global:
+            logging.error("Decider: Assessor LLM (_assessor_llm_global from shared_instances) not initialized. Cannot assess objective.")
             return "critical_error" # Cannot proceed without assessor
 
         original_plan_str = "\n".join(f"- {s}" for s in plan)
@@ -74,7 +73,7 @@ def should_continue_decider(state: BuddyGraphState) -> str:
         try:
             # Assuming _assessor_llm_global is already configured for structured_output(Assessment)
             # This was done in set_global_llms_and_agents
-            ai_response = _assessor_llm_global.with_structured_output(Assessment).invoke(prompt)
+            ai_response = deciders_shared_instances._assessor_llm_global.with_structured_output(Assessment).invoke(prompt)
 
 
             if not isinstance(ai_response, Assessment):
