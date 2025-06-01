@@ -34,23 +34,15 @@ logging.basicConfig(
 console = Console()
 
 # --- API Key Configuration ---
-DEFAULT_API_KEY = "AIzaSyAAfE6ydHeGx9-VVVVMbBLcMrB8QtGdpfE" # Replace with your actual default key or use None
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", DEFAULT_API_KEY)
-
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 if not GOOGLE_API_KEY:
-    logging.error("GOOGLE_API_KEY not found. Please set it as an environment variable or in the script.")
-    # console.print(Markdown("**ERROR:** GOOGLE_API_KEY not found.")) # Also print to console if critical
-    exit("Critical Error: GOOGLE_API_KEY is not set.")
-elif GOOGLE_API_KEY == DEFAULT_API_KEY:
-    logging.info("Using default GOOGLE_API_KEY from script.")
-    # console.print(Markdown("Using **default GOOGLE_API_KEY** from script.")) # Optional: User feedback
+    logging.error("GOOGLE_API_KEY not found in environment. The application will likely fail.")
+    # Let the program continue and fail at LLM instantiation, which will provide a clear error.
 else:
-    logging.info("Using GOOGLE_API_KEY from environment.")
-    # console.print(Markdown("Using **GOOGLE_API_KEY** from environment.")) # Optional: User feedback
-os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
+    os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY # Ensure it's set for langchain
+    logging.info("GOOGLE_API_KEY found and set in environment.")
 
 logging.info("Buddy AI Agent Initializing...")
-# console.print(Markdown("# Buddy AI Agent Initializing...")) # Title can be part of overall output structure
 
 def read_file_or_directory(path_str: str) -> str:
     path = pathlib.Path(path_str)
@@ -62,7 +54,6 @@ def read_file_or_directory(path_str: str) -> str:
             content_parts.append(f"### Content from file: {path.name}\n```\n{file_content}\n```")
         except Exception as e:
             logging.error(f"Error reading file {path}: {e}")
-            # console.print(Markdown(f"**Error reading file {path}:** {e}")) # Keep console for critical user feedback
             return f"Error reading file {path}: {e}" # Return error string for context
     elif path.is_dir():
         content_parts.append(f"### Content from directory: {path.name}\n")
@@ -85,28 +76,18 @@ def read_file_or_directory(path_str: str) -> str:
              content_parts.append("\nNo text files found in directory.")
     else:
         logging.error(f"Path '{path_str}' is not a valid file or directory.")
-        # console.print(Markdown(f"**Error: Path '{path_str}' is not a valid file or directory.**"))
         return f"Error: Path '{path_str}' is not a valid file or directory."
     return "\n\n".join(content_parts)
 
 
-def create_llm_instance(model_name_primary: str, model_name_fallback: str, llm_type: str):
+def create_llm_instance(model_name_primary: str, llm_type: str):
     try:
-        llm = ChatGoogleGenerativeAI(model=model_name_primary, temperature=0) # Removed convert_system_message_to_human
-        logging.info(f"{llm_type} LLM created successfully using {model_name_primary}.")
-        # console.print(Markdown(f"**{llm_type} LLM created successfully using `{model_name_primary}`.**")) # Less verbose
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-preview-04-17", temperature=0)
+        logging.info(f"{llm_type} LLM created successfully using gemini-1.5-flash-preview-04-17.")
         return llm
     except Exception as e:
-        logging.error(f"Error creating {llm_type} LLM with {model_name_primary}: {e}. Trying fallback {model_name_fallback}.")
-        try:
-            llm = ChatGoogleGenerativeAI(model=model_name_fallback, temperature=0) # Removed convert_system_message_to_human
-            logging.info(f"{llm_type} LLM created successfully using {model_name_fallback} (fallback).")
-            # console.print(Markdown(f"**{llm_type} LLM created successfully using `{model_name_fallback}` (fallback).**"))
-            return llm
-        except Exception as e_fallback:
-            logging.error(f"Error creating {llm_type} LLM with fallback {model_name_fallback}: {e_fallback}", exc_info=True)
-            # traceback.print_exc() no longer needed due to exc_info=True
-            return None
+        logging.error(f"Error creating {llm_type} LLM with gemini-1.5-flash-preview-04-17: {e}", exc_info=True)
+        return None
 
 def create_executor_agent_runnable(llm):
     if not llm: return None
@@ -115,11 +96,9 @@ def create_executor_agent_runnable(llm):
     try:
         executor_agent = create_react_agent(llm, tools=tools)
         logging.info("Executor ReAct agent created successfully with ShellTool.")
-        # console.print(Markdown("**Executor ReAct agent created successfully with `ShellTool`.**")) # Less verbose
         return executor_agent
     except Exception as e:
         logging.error(f"Error creating Executor Agent: {e}", exc_info=True)
-        # traceback.print_exc() no longer needed
         return None
 
 class Plan(BaseModel):
@@ -178,18 +157,12 @@ def planner_node(state: BuddyGraphState) -> dict:
     context = state.get("context", "")
 
     global _planner_llm_structured
-    if not _planner_llm_structured:
-        logging.error("CRITICAL ERROR: Planner LLM not initialized for planner_node.")
-        # console.print(Markdown("**CRITICAL ERROR: Planner LLM not initialized for planner_node.**")) # User facing
-        return {
-            "plan": ["Critical Error: Planner LLM not initialized."],
-            "current_step_index": 0,
-            "step_results": []
-        }
+    # The _planner_llm_structured is initialized in __main__ and an error there exits the program.
+    # If it's None here, it's an unexpected state, but the program would likely fail anyway.
+    # The critical error check before was more for a state where it *could* be None due to some conditional logic.
 
     formatted_prompt = _PLANNER_PROMPT_TEMPLATE.format(objective=objective, context=context)
     logging.debug(f"Planner input prompt: {formatted_prompt}")
-    # console.print(f"Planner input (first 300 chars): {formatted_prompt[:300].strip()}...") # Replaced by logging
 
     plan_steps = []
     try:
@@ -198,12 +171,10 @@ def planner_node(state: BuddyGraphState) -> dict:
             plan_steps = ai_response.steps
             if not all(isinstance(step, str) for step in plan_steps):
                 logging.error(f"Invalid plan structure (non-string steps): {ai_response.steps}")
-                # console.print(Markdown(f"**Invalid plan structure (non-string steps):** {ai_response.steps}"))
                 plan_steps = ["Critical Error: Planner returned non-string steps."]
         else:
             plan_steps = ["Critical Error: Planner returned no steps or invalid plan structure."]
             logging.error(f"Invalid plan structure from LLM: {ai_response}")
-            # console.print(Markdown(f"**Invalid plan structure from LLM:** {ai_response}"))
 
         logging.info(f"Generated plan: {plan_steps}")
         plan_md = "\n".join(f"{i+1}. {step}" for i, step in enumerate(plan_steps))
@@ -211,7 +182,6 @@ def planner_node(state: BuddyGraphState) -> dict:
 
     except Exception as e:
         logging.error(f"Error invoking structured planner LLM: {e}", exc_info=True)
-        # console.print(Markdown(f"**Error invoking structured planner LLM:** {e}"))
         plan_steps = [f"Critical Error: Exception during planning - {str(e)}"]
 
     return {"plan": plan_steps, "current_step_index": 0, "step_results": []}
@@ -221,25 +191,20 @@ def executor_node(state: BuddyGraphState) -> dict:
     """Executes a single step of the plan using the ReAct agent."""
     logging.info(f"Entering executor_node for step index {state.get('current_step_index', 0)}.")
     global _executor_agent_runnable_global
-    if not _executor_agent_runnable_global:
-        logging.error("CRITICAL ERROR: Executor agent not initialized for executor_node.")
-        # console.print(Markdown("**CRITICAL ERROR: Executor agent not initialized for executor_node.**"))
-        return {
-            "step_results": ["Critical Error: Executor agent not initialized."],
-            "current_step_index": state.get("current_step_index", 0) + 1
-        }
+    # _executor_agent_runnable_global is initialized in __main__ and an error there exits the program.
 
     plan = state.get("plan")
     current_idx = state.get("current_step_index", 0)
 
-    step_output_str = "Error: Pre-execution state error in executor_node."
+    step_output_str = "Error: Pre-execution state error in executor_node." # Default error
     next_step_idx = current_idx + 1
 
-    if not plan or not isinstance(plan, list) or current_idx >= len(plan) or not plan[current_idx]:
-        step_output_str = "Error: Invalid plan, step index out of bounds, or empty/invalid step."
+    if not plan or not isinstance(plan, list) or not (0 <= current_idx < len(plan)) or not plan[current_idx]:
+        step_output_str = "Error: Invalid plan, step index out of bounds, or empty step content."
         logging.error(step_output_str)
+        # Propagate critical error from planner if it's the source
         if plan and isinstance(plan, list) and len(plan) > 0 and plan[0].startswith("Critical Error"):
-            step_output_str = plan[0] # Propagate planner's critical error
+            step_output_str = plan[0]
     else:
         current_instruction = plan[current_idx]
         console.print(Markdown(f"### Executing Step {current_idx + 1}/{len(plan)}: *{current_instruction}*"))
@@ -257,7 +222,6 @@ def executor_node(state: BuddyGraphState) -> dict:
                 logging.error(f"Unexpected agent response format for step {current_idx + 1}: {agent_response}")
         except Exception as e:
             logging.error(f"Error invoking executor agent for step '{current_instruction}': {e}", exc_info=True)
-            # console.print(Markdown(f"**Error invoking executor agent for step '{current_instruction}':** {e}"))
             step_output_str = f"Error executing step '{current_instruction}': {str(e)}"
 
     console.print(Markdown(f"**Result of Step {current_idx + 1}:**\n```text\n{step_output_str}\n```"))
@@ -271,23 +235,20 @@ def should_continue_decider(state: BuddyGraphState) -> str:
     plan = state.get("plan")
     current_idx = state.get("current_step_index", 0)
 
-    if not plan or not isinstance(plan, list) or len(plan) == 0 or not plan[0]:
-        logging.info("Decider: Invalid or empty plan. Ending workflow.")
-        # console.print(Markdown("*Decider: Invalid or empty plan. Ending.*"))
+    # Simplified check for plan validity and completion
+    if not plan or not isinstance(plan, list) or current_idx >= len(plan):
+        if current_idx >= len(plan) and plan and len(plan) > 0 : # Check if plan exists and has items
+             logging.info("Decider: All steps executed or current index exceeds plan length. Ending workflow.")
+        else:
+             logging.info("Decider: Invalid or empty plan. Ending workflow.")
         return "end_workflow"
 
+    # Check for critical error propagated from planner
     if plan[0].startswith("Critical Error:"):
         logging.info("Decider: Critical error in plan from planner node. Ending workflow.")
-        # console.print(Markdown("*Decider: Critical error in plan from planner node. Ending.*"))
-        return "end_workflow"
-
-    if current_idx >= len(plan):
-        logging.info("Decider: All steps executed or current index exceeds plan length. Ending workflow.")
-        # console.print(Markdown("*Decider: All steps executed or current index exceeds plan length. Ending.*"))
         return "end_workflow"
 
     logging.info(f"Decider: Continuing to execute step {current_idx + 1}.")
-    # console.print(Markdown(f"*Decider: Continuing to execute step {current_idx + 1}.*"))
     return "continue_to_executor"
 
 
@@ -302,7 +263,6 @@ if __name__ == "__main__":
         try:
             prompt_input = pathlib.Path(prompt_input).read_text(encoding='utf-8')
             logging.info(f"Prompt loaded from file: {args.prompt}")
-            # console.print(Markdown(f"**Prompt loaded from file:** `{args.prompt}`")) # User sees final objective
         except Exception as e:
             logging.error(f"Error reading prompt file {args.prompt}: {e}", exc_info=True)
             console.print(Markdown(f"**Critical Error:** Could not read prompt file `{args.prompt}`. See logs for details."))
@@ -311,7 +271,6 @@ if __name__ == "__main__":
     context_input_str = ""
     if args.context:
         logging.info(f"Loading context from: {args.context}")
-        # console.print(Markdown(f"**Loading context from:** `{args.context}`")) # User sees final context
         context_input_str = read_file_or_directory(args.context)
 
     console.print(Markdown(f"# User Objective\n\n{prompt_input}"))
@@ -322,7 +281,7 @@ if __name__ == "__main__":
         console.print(Markdown("--- \n*No context provided.*"))
 
     logging.info("Initializing LLMs and Agent...")
-    planner_llm_instance = create_llm_instance("gemini-1.5-flash-latest", "gemini-pro", "Planner")
+    planner_llm_instance = create_llm_instance("gemini-1.5-flash-preview-04-17", "Planner")
     if not planner_llm_instance:
         console.print(Markdown("**CRITICAL ERROR:** Planner LLM failed to initialize. Buddy cannot proceed."))
         exit("CRITICAL: Planner LLM could not be initialized. Exiting.")
@@ -334,7 +293,7 @@ if __name__ == "__main__":
         console.print(Markdown("**CRITICAL ERROR:** Failed to configure planner. Buddy cannot proceed."))
         exit(1)
 
-    executor_llm_instance = create_llm_instance("gemini-1.5-flash-latest", "gemini-pro", "Executor")
+    executor_llm_instance = create_llm_instance("gemini-1.5-flash-preview-04-17", "Executor")
     if not executor_llm_instance:
         console.print(Markdown("**CRITICAL ERROR:** Executor LLM failed to initialize. Buddy cannot proceed."))
         exit("CRITICAL: Executor LLM could not be initialized. Exiting.")
@@ -356,7 +315,6 @@ if __name__ == "__main__":
 
     app = workflow.compile()
     logging.info("StateGraph compiled successfully.")
-    # console.print(Markdown("\n**StateGraph compiled successfully.**")) # Less verbose
 
     initial_state = {
         "objective": prompt_input, "context": context_input_str,
@@ -378,24 +336,13 @@ if __name__ == "__main__":
         console.print(Markdown("\n# --- Buddy AI Workflow Complete ---"))
 
         final_plan = final_graph_output_state.get('plan', [])
-        # Plan is already printed by planner_node with Markdown
-        # plan_md = "\n".join(f"{i+1}. {step}" for i, step in enumerate(final_plan))
-        # console.print(Markdown(f"## Final Execution Plan:\n{plan_md if final_plan else '  No plan was generated or retained.'}"))
-
         final_step_results = final_graph_output_state.get('step_results', [])
-        # Step results are already printed by executor_node with Markdown
-        # console.print(Markdown("## Execution Step Results:"))
-        # if final_step_results:
-        #     for i, result_text in enumerate(final_step_results):
-        #         console.print(Markdown(f"### Output of Step {i+1}:\n```text\n{result_text}\n```"))
-        # else:
-        #     console.print(Markdown("*No step results recorded.*"))
 
-        if final_step_results and not (final_plan and final_plan[0].startswith("Critical Error")):
+        if final_step_results and not (final_plan and len(final_plan) > 0 and final_plan[0].startswith("Critical Error")):
              console.print(Markdown("## --- Consolidated Output ---"))
              final_consolidated_output = "\n\n---\n\n".join(map(str,final_step_results))
              console.print(Markdown(final_consolidated_output))
-        elif final_plan and final_plan[0].startswith("Critical Error"):
+        elif final_plan and len(final_plan) > 0 and final_plan[0].startswith("Critical Error"):
             console.print(Markdown(f"**Workflow ended due to planner error:** {final_plan[0]}"))
         else:
             console.print(Markdown("*No step results to consolidate, or workflow ended prematurely.*"))
@@ -403,4 +350,3 @@ if __name__ == "__main__":
         console.print(Markdown("\n**Graph execution failed or did not produce a final state.** See logs for details."))
 
     logging.info("Buddy application finished.")
-    # console.print(Markdown("\n**Buddy application finished.**")) # Less verbose

@@ -1,0 +1,8 @@
+langchain-google-genai
+langchain-community
+langgraph
+pydantic
+langchain-core
+rich
+langchain-experimental
+google-auth
