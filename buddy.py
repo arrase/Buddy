@@ -82,7 +82,7 @@ def read_file_or_directory(path_str: str) -> str:
 
 def create_llm_instance(model_name_primary: str, llm_type: str):
     try:
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-preview-04-17", temperature=0)
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0)
         logging.info(f"{llm_type} LLM created successfully using gemini-1.5-flash-preview-04-17.")
         return llm
     except Exception as e:
@@ -281,7 +281,7 @@ if __name__ == "__main__":
         console.print(Markdown("--- \n*No context provided.*"))
 
     logging.info("Initializing LLMs and Agent...")
-    planner_llm_instance = create_llm_instance("gemini-1.5-flash-preview-04-17", "Planner")
+    planner_llm_instance = create_llm_instance("gemini-2.5-flash-preview-04-17", "Planner")
     if not planner_llm_instance:
         console.print(Markdown("**CRITICAL ERROR:** Planner LLM failed to initialize. Buddy cannot proceed."))
         exit("CRITICAL: Planner LLM could not be initialized. Exiting.")
@@ -293,7 +293,7 @@ if __name__ == "__main__":
         console.print(Markdown("**CRITICAL ERROR:** Failed to configure planner. Buddy cannot proceed."))
         exit(1)
 
-    executor_llm_instance = create_llm_instance("gemini-1.5-flash-preview-04-17", "Executor")
+    executor_llm_instance = create_llm_instance("gemini-2.5-flash-preview-04-17", "Executor")
     if not executor_llm_instance:
         console.print(Markdown("**CRITICAL ERROR:** Executor LLM failed to initialize. Buddy cannot proceed."))
         exit("CRITICAL: Executor LLM could not be initialized. Exiting.")
