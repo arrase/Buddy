@@ -1,8 +1,10 @@
-import os
+import os # Already imported, but ensure it's used for getcwd
 import json
 import argparse
 import functools
 import sys # Added for sys.exit
+import subprocess # Added for shell tool
+from langchain.tools import Tool # Added for shell tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -24,6 +26,99 @@ class PlanExecuteState(TypedDict):
 # 3. Initialize LLM
 # Global LLM variable, will be initialized in main after API key check
 llm = None
+
+# Agent's Current Working Directory
+AGENT_WORKING_DIRECTORY = os.getcwd()
+
+# Shell Command Execution Tool
+def execute_shell_command(command: str) -> str:
+    global AGENT_WORKING_DIRECTORY # Declare intention to modify global variable
+    """
+    Executes a shell command, managing a virtual working directory, and returns its output.
+    Handles 'cd' commands by changing the virtual working directory.
+    """
+    try:
+        command_trimmed = command.strip()
+
+        # Handle 'cd' command
+        if command_trimmed.startswith("cd "):
+            path_to_change = command_trimmed[3:].strip()
+            if not path_to_change or path_to_change == "~" or path_to_change == "$HOME":
+                # Basic handling for 'cd' to home. More robust handling might use os.path.expanduser('~')
+                # For simplicity, we'll restrict 'cd' to explicit paths or prevent 'cd' without args.
+                # For now, let's require an explicit path.
+                user_home = os.path.expanduser('~')
+                if command_trimmed == "cd" or command_trimmed == "cd ~" or command_trimmed == f"cd {user_home}":
+                     AGENT_WORKING_DIRECTORY = user_home
+                     success_msg = f"Changed virtual working directory to: {AGENT_WORKING_DIRECTORY}"
+                     print(success_msg)
+                     return success_msg
+                elif not path_to_change:
+                    return "Error: 'cd' without a specific path argument is not fully supported. Use 'cd ~' or 'cd /path/to/dir'."
+
+
+            # Resolve new path
+            if os.path.isabs(path_to_change):
+                new_dir = path_to_change
+            else:
+                new_dir = os.path.join(AGENT_WORKING_DIRECTORY, path_to_change)
+
+            new_dir = os.path.normpath(new_dir) # Normalize path (e.g., ..)
+
+            if os.path.isdir(new_dir):
+                AGENT_WORKING_DIRECTORY = new_dir
+                success_msg = f"Changed virtual working directory to: {AGENT_WORKING_DIRECTORY}"
+                print(success_msg)
+                return success_msg
+            else:
+                error_msg = f"Error: Directory not found or not a directory: {new_dir} (from CWD: {AGENT_WORKING_DIRECTORY})"
+                print(error_msg)
+                return error_msg
+
+        # For other commands, execute in AGENT_WORKING_DIRECTORY
+        print(f"Attempting to execute shell command: '{command}' in directory '{AGENT_WORKING_DIRECTORY}'")
+        process = subprocess.run(
+            command,
+            shell=True, # Still using shell=True for convenience; be mindful of security.
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=AGENT_WORKING_DIRECTORY # Use the agent's current working directory
+        )
+
+        output = ""
+        if process.stdout:
+            output += f"Stdout:\n{process.stdout.strip()}"
+        if process.stderr:
+            if process.stdout.strip(): # Check if stdout had actual content
+                output += "\n"
+            output += f"Stderr:\n{process.stderr.strip()}"
+
+        if not output.strip() and process.returncode == 0: # Check if output is effectively empty
+            output = "Command executed successfully with no output."
+        elif not output.strip() and process.returncode != 0:
+            output = f"Command failed with return code {process.returncode} and no output."
+
+
+        full_log = f"Command: '{command}', CWD: '{AGENT_WORKING_DIRECTORY}', Return Code: {process.returncode}, Output:\n{output.strip()}"
+        print(full_log)
+        return output.strip()
+
+    except subprocess.TimeoutExpired:
+        error_message = f"Error: Command '{command}' timed out after 30 seconds (CWD: {AGENT_WORKING_DIRECTORY})."
+        print(error_message)
+        return error_message
+    except Exception as e:
+        error_message = f"Error executing command '{command}' (CWD: {AGENT_WORKING_DIRECTORY}): {e}"
+        print(error_message)
+        return error_message
+
+shell_tool = Tool(
+    name="ShellCommandExecutor",
+    func=execute_shell_command,
+    description="Executes a given shell command and returns its standard output and standard error. Use this for tasks requiring interaction with the operating system, like file manipulation, package management, or running scripts."
+)
 
 # 4. Implement Planner Node
 def parse_llm_list_output(text: str) -> List[str]:
@@ -49,22 +144,32 @@ def parse_llm_list_output(text: str) -> List[str]:
             parsed_list.append(cleaned_line)
     return parsed_list
 
-PLANNER_PROMPT = ChatPromptTemplate.from_messages(
-    [
-        ("system",
-         "You are a helpful AI assistant that generates a step-by-step plan to address a user's request. "
-         "The user's request is provided in the 'prompt' and any relevant 'context' is also given. "
-         "Break down the prompt into a series of clear, numbered steps. "
-         "Output *only* the list of steps, with each step on a new line. Do not include any other text or explanations. "
-         "For example, if the prompt is 'Research and write a blog post about AI', your output should be like:\n"
-         "1. Research the current trends in AI.\n"
-         "2. Outline the structure of the blog post.\n"
-         "3. Write the first draft of the blog post.\n"
-         "4. Review and edit the blog post.\n"
-         "5. Publish the blog post."),
-        ("human", "Prompt: {prompt}\nContext: {context}")
-    ]
-)
+PLANNER_PROMPT_TEMPLATE = """You are a helpful AI assistant. Your goal is to create a step-by-step plan to accomplish the user's request.
+The user may ask for tasks related to general knowledge, programming, or Linux system administration.
+
+You have an executor that can perform the following actions:
+1.  Answer questions or generate text based on its knowledge and the provided context.
+2.  Execute shell commands on a Linux system using a 'ShellCommandExecutor' tool. This tool can run commands like ls, cat, python, pip, apt, etc.
+
+When creating the plan, if a step requires running a shell command, clearly state the command to be run.
+For example:
+- "Run the command `ls -la` to list directory contents."
+- "Install the 'requests' Python library using the command `pip install requests`."
+- "Check the Python version with the command `python --version`."
+
+Break down the user's request into a series of clear, numbered steps.
+The output should be a list of strings, where each string is a step in the plan.
+
+User Request: {prompt}
+Context (if any): {context}
+
+Respond *only* with the numbered list of plan steps. Do not add any other text, preamble, or explanation.
+Example format:
+1. First step.
+2. Second step, which might involve a command like `echo "hello"`.
+3. Third step.
+"""
+PLANNER_PROMPT = ChatPromptTemplate.from_template(PLANNER_PROMPT_TEMPLATE)
 
 def get_planner(llm):
     planner_chain = PLANNER_PROMPT | llm
@@ -76,14 +181,24 @@ EXECUTOR_PROMPT = ChatPromptTemplate.from_messages(
     [
         ("system",
          "You are a helpful AI assistant that executes a single step from a plan. "
-         "You are given the overall 'prompt', the 'context', the 'plan' (list of all steps), "
+         "You are given the overall 'prompt' (overall goal), the 'context', the 'plan' (list of all steps), "
          "the 'past_steps' (already executed steps and their results), and the 'current_step' to execute. "
          "Focus *only* on the 'current_step'. Do not try to execute other steps. "
-         "Provide a concise result for the current step. Do not output any other text or explanations. "
-         "If the current step is to write code, provide only the code. "
-         "If the current step is to answer a question, provide only the answer."),
+         "\n\nYou have access to the following tool:\n"
+         f"- {shell_tool.name}: {shell_tool.description}\n\n"
+         "If you need to use the ShellCommandExecutor tool to accomplish the current step, respond *only* with a JSON object in the following format:\n"
+         '```json\n'
+         '{{\n'
+         '  "tool_to_use": "ShellCommandExecutor",\n'
+         '  "command_to_run": "your shell command here"\n'
+         '}}\n'
+         '```\n'
+         "Ensure the JSON is perfectly formatted. Do not add any text before or after the JSON object if using the tool.\n"
+         "If you do not need to use the tool, provide your direct answer or result for completing the step as a plain string. "
+         "If the step is to write code, provide only the code. "
+         "If the step is to answer a question, provide only the answer."),
         ("human",
-         "Overall Prompt: {prompt}\n"
+         "Overall Prompt (Goal): {prompt}\n"
          "Context: {context}\n"
          "Full Plan:\n{plan_str}\n"
          "Past Steps (step, result):\n{past_steps_str}\n"
@@ -93,36 +208,88 @@ EXECUTOR_PROMPT = ChatPromptTemplate.from_messages(
 
 def get_executor(llm):
     executor_chain = EXECUTOR_PROMPT | llm
-    return executor_chain | (lambda ऐresponse: ऐresponse.content) # Extract content from AIMessage
+    # We will get raw AIMessage and extract content in execute_step, as we need to check for tool use first.
+    return executor_chain
 
 # 6. Define Graph Logic Functions
 def execute_step(state: PlanExecuteState):
-    executor = get_executor(llm) # llm should be initialized by now
+    executor_chain = get_executor(llm) # llm should be initialized by now
     current_step_description = state['plan'][state['next_step_index']]
 
     plan_str = "\n".join(f"{i+1}. {s}" for i, s in enumerate(state['plan']))
-    past_steps_str = "\n".join(f"- {step}: {result}" for step, result in state['past_steps']) if state['past_steps'] else "No steps executed yet."
+    # Format past_steps for the prompt
+    past_steps_formatted = "\n".join([f"Step: {ps[0]}\nResult: {ps[1]}" for ps in state['past_steps']]) \
+        if state['past_steps'] else "No steps executed yet."
 
     print(f"\n--- Executing Step {state['next_step_index'] + 1} ---")
     print(f"Action: {current_step_description}")
 
-    llm_result: str
+    step_output: str
     try:
-        llm_result = executor.invoke({
+        # Get raw AIMessage from LLM
+        raw_executor_response_message = executor_chain.invoke({
             "prompt": state['prompt'],
             "context": state['context'],
             "plan_str": plan_str,
-            "past_steps_str": past_steps_str,
+            "past_steps_str": past_steps_formatted, # Use the formatted string
             "current_step": current_step_description
         })
-    except Exception as e:
-        print(f"Error during executor LLM call for step '{current_step_description}': {e}")
-        llm_result = f"Error executing step: {e}" # Store error as result
 
-    print(f"Result: {llm_result}")
+        # Extract content from AIMessage
+        raw_executor_response = raw_executor_response_message.content if hasattr(raw_executor_response_message, 'content') else str(raw_executor_response_message)
+
+        # Attempt to parse for tool use
+        try:
+            # Clean the response: remove markdown, leading/trailing whitespace.
+            cleaned_response = raw_executor_response.strip()
+            if cleaned_response.startswith("```json") and cleaned_response.endswith("```"):
+                cleaned_response = cleaned_response[7:-3].strip()
+            elif cleaned_response.startswith("`json") and cleaned_response.endswith("`"): # Handle single backtick
+                 cleaned_response = cleaned_response[5:-1].strip()
+            elif cleaned_response.startswith("{") and cleaned_response.endswith("}"): # Already looks like JSON
+                pass # Use as is
+            # else: It's not wrapped in JSON markdown, assume it's a direct string or malformed.
+
+            # Try to parse the cleaned string as JSON.
+            tool_call_request = json.loads(cleaned_response)
+
+            # Check if it's a dictionary and if it's a request for our shell tool.
+            if isinstance(tool_call_request, dict) and \
+               tool_call_request.get("tool_to_use") == shell_tool.name:
+                command = tool_call_request.get("command_to_run")
+
+                # Validate the command.
+                if command and isinstance(command, str):
+                    print(f"EXECUTOR: Identified shell command: '{command}' for step: '{current_step_description}' (Tool: {shell_tool.name})")
+                    step_output = shell_tool.run(command) # Execute the command.
+                elif command: # Command is present but not a string.
+                     error_msg = f"Error: {shell_tool.name} was called, but 'command_to_run' was not a valid string: Got '{command}' (type: {type(command).__name__})."
+                     print(error_msg)
+                     step_output = error_msg
+                else: # Command is missing.
+                    error_msg = f"Error: {shell_tool.name} was called, but no 'command_to_run' was provided."
+                    print(error_msg)
+                    step_output = error_msg
+            else:
+                # It was valid JSON, but not a request for the ShellCommandExecutor tool.
+                # Treat as a direct answer from the LLM.
+                step_output = raw_executor_response
+        except json.JSONDecodeError:
+            # The response was not valid JSON. Treat as a direct answer from the LLM.
+            step_output = raw_executor_response
+        except Exception as e:
+            # Catch any other errors during the parsing or tool logic.
+            print(f"Error processing executor response or during tool call attempt: {e}")
+            step_output = f"Error during step execution logic: {e}"
+
+    except Exception as e: # Catch errors from the LLM call itself.
+        print(f"Error during executor LLM call for step '{current_step_description}': {e}")
+        step_output = f"Error executing step (LLM call failed): {e}"
+
+    print(f"Result: {step_output}")
     print("--------------------------")
 
-    updated_past_steps = state['past_steps'] + [(current_step_description, llm_result)]
+    updated_past_steps = state['past_steps'] + [(current_step_description, step_output)]
     next_index = state['next_step_index'] + 1
 
     return {"past_steps": updated_past_steps, "next_step_index": next_index}
@@ -226,6 +393,21 @@ def read_directory_content(dir_path: str) -> str:
 
 # 8. Main Execution Logic
 if __name__ == "__main__":
+    # ---- ADD WARNING START ----
+    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+    print("!!! WARNING: Buddy AI Agent - Shell Command Execution      !!!")
+    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+    print("This agent can execute shell commands generated by an AI model.")
+    print("Executing AI-generated commands can be DANGEROUS and may lead to:")
+    print("- Unintended system modifications")
+    print("- Data loss or corruption")
+    print("- Security vulnerabilities")
+    print("ALWAYS review the generated plan and the specific commands before execution if possible,")
+    print("and only run this agent in a safe, isolated environment if you are unsure.")
+    print("You are responsible for any actions taken by this agent.")
+    print("--------------------------------------------------------------")
+    # ---- ADD WARNING END ----
+
     # API Key Check
     if not GOOGLE_API_KEY:
         print("Error: GOOGLE_API_KEY is not set. Please set it in the script or as an environment variable.")

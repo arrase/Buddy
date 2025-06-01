@@ -1,0 +1,4 @@
+I need to set up a small Python project.
+1. Create a new directory called 'my_test_project'.
+2. Inside 'my_test_project', create a Python file named 'app.py' that prints 'Hello from app.py'.
+3. Check the Python version installed on the system.
