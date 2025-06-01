@@ -13,7 +13,8 @@ from .agent import (
     create_llm_instance,
     create_executor_agent_runnable,
     set_global_llms_and_agents,
-    create_buddy_graph
+    create_buddy_graph,
+    set_agent_console # Added this
 )
 
 cli_console = Console()
@@ -30,7 +31,18 @@ def setup_logging():
     logging.info(f"Logging initialized with level {log_level_str}.")
 
 def main():
+    # cli_console is defined globally, but typically instantiated and used within main or other functions.
+    # For clarity and ensuring it's the same instance, we can re-assign it here if needed,
+    # or rely on the global one if its state is managed carefully.
+    # However, the prompt asks to add the call *after* `cli_console = Console()`.
+    # The existing code has `cli_console = Console()` at the global scope.
+    # Let's assume the instruction meant to ensure it's set before use.
+    # The global cli_console is already initialized when this module is imported.
+    # We will call set_agent_console directly using the global cli_console.
+
     setup_logging()
+    # Ensure agent console is set early
+    set_agent_console(cli_console) # <--- Added this line
     logging.debug("Debug logging test message.")
     parser = argparse.ArgumentParser(description="Buddy AI Agent CLI - Your AI assistant for various tasks.")
     parser.add_argument("--prompt", type=str, required=True,

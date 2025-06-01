@@ -9,13 +9,7 @@ from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
 from rich.markdown import Markdown # Added for printing plan
-try:
-    # Attempt direct import first
-    from .cli import cli_console
-except ImportError:
-    # Fallback if direct import causes issues (e.g. during testing or if cli.py not fully initialized)
-    import buddy_ai.cli as buddy_cli
-    cli_console = buddy_cli.cli_console
+from rich.console import Console # Added for agent console
 
 
 # --- Pydantic Models and TypedDicts for Graph State ---
@@ -44,6 +38,7 @@ class BuddyGraphState(TypedDict):
 _planner_llm_structured: Optional[ChatGoogleGenerativeAI] = None
 _executor_agent_runnable_global: Optional[callable] = None
 _assessor_llm_global: Optional[ChatGoogleGenerativeAI] = None # NEW
+_agent_cli_console: Optional[Console] = None # Added for agent console
 
 # --- Planner Prompt Template ---
 _PLANNER_PROMPT_TEMPLATE = (
@@ -235,6 +230,13 @@ def replanner_node(state: BuddyGraphState) -> dict:
 # --- Human Approval Node ---
 def human_approval_node(state: BuddyGraphState) -> dict:
     logging.info("Entering human_approval_node.")
+
+    global _agent_cli_console
+    if _agent_cli_console is None:
+        logging.critical("CRITICAL: Agent CLI console not set in human_approval_node. This should have been set by the CLI.")
+        # Return an error state that can be handled by the graph
+        return {"plan_approved": False, "user_feedback": "Critical Error: Agent console not configured.", "plan": ["Critical Error: Agent console not configured."]}
+
     auto_approve = state.get("auto_approve", False)
     # Log initial state relevant to approval
     logging.info(f"Plan approval state: auto_approve={auto_approve}, current_plan_approved={state.get('plan_approved')}, user_feedback_present={bool(state.get('user_feedback'))}")
@@ -260,11 +262,11 @@ def human_approval_node(state: BuddyGraphState) -> dict:
 
 
     plan_md = "\n".join(f"{i+1}. {step}" for i, step in enumerate(plan))
-    cli_console.print(Markdown(f"## Proposed Execution Plan:\n{plan_md}"))
+    _agent_cli_console.print(Markdown(f"## Proposed Execution Plan:\n{plan_md}"))
 
     while True:
         try:
-            raw_input = cli_console.input("[bold yellow]Plan Review[/bold yellow]: ([bold green]A[/bold green])pprove, ([bold blue]R[/bold blue])efine, or ([bold red]C[/bold red])ancel plan? ").strip().lower()
+            raw_input = _agent_cli_console.input("[bold yellow]Plan Review[/bold yellow]: ([bold green]A[/bold green])pprove, ([bold blue]R[/bold blue])efine, or ([bold red]C[/bold red])ancel plan? ").strip().lower()
         except KeyboardInterrupt: # Handle Ctrl+C as cancellation
             logging.warning("User cancelled via KeyboardInterrupt during plan approval.")
             raw_input = 'c' # Treat as cancel
@@ -278,15 +280,15 @@ def human_approval_node(state: BuddyGraphState) -> dict:
             logging.info("User chose to refine the plan.")
             while True:
                 try:
-                    feedback = cli_console.input("Please provide feedback for replanning: ").strip()
+                    feedback = _agent_cli_console.input("Please provide feedback for replanning: ").strip()
                     if feedback:
                         current_user_feedback = feedback
                         current_plan_approved = False
                         # logging.info(f"User feedback for replan: {feedback}") # Logged after loop breaks
                         break
                     else:
-                        cli_console.print("[bold red]Feedback cannot be empty if you choose to refine. Please provide your comments or (C)ancel refinement.[/bold red]")
-                        sub_choice = cli_console.input("Enter feedback or (C)ancel refinement: ").strip().lower()
+                        _agent_cli_console.print("[bold red]Feedback cannot be empty if you choose to refine. Please provide your comments or (C)ancel refinement.[/bold red]")
+                        sub_choice = _agent_cli_console.input("Enter feedback or (C)ancel refinement: ").strip().lower()
                         if sub_choice == 'c':
                             current_user_feedback = None
                             break
@@ -306,7 +308,7 @@ def human_approval_node(state: BuddyGraphState) -> dict:
             break
         else:
             logging.debug("Invalid input from user during plan approval.") # Log before print
-            cli_console.print("[bold red]Invalid input. Please enter 'A', 'R', or 'C'.[/bold red]")
+            _agent_cli_console.print("[bold red]Invalid input. Please enter 'A', 'R', or 'C'.[/bold red]")
 
     # Log final outcome of the node before returning
     if current_plan_approved:
@@ -477,3 +479,9 @@ def create_buddy_graph() -> StateGraph:
     app = workflow.compile()
     logging.info("StateGraph compiled successfully.")
     return app
+
+# --- Console Setter for Agent ---
+def set_agent_console(console: Console):
+    global _agent_cli_console
+    _agent_cli_console = console
+    logging.info("Agent CLI console set.")
