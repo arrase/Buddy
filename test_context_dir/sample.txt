@@ -1,1 +1,0 @@
-Sample context from a file in a directory.
