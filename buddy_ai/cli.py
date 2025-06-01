@@ -139,8 +139,9 @@ def main():
                 # Update our copy of the plan for executor display
                 initial_state["plan"] = current_plan
                 if current_plan and not (isinstance(current_plan,list) and len(current_plan)>0 and current_plan[0].startswith("Critical Error:")):
-                    plan_md = "\n".join(f"{i+1}. {step}" for i, step in enumerate(current_plan))
-                    cli_console.print(Markdown(f"## Execution Plan Proposed:\n{plan_md}"))
+                    # plan_md = "\n".join(f"{i+1}. {step}" for i, step in enumerate(current_plan)) # Commented out as plan_md is no longer used here
+                    # cli_console.print(Markdown(f"## Execution Plan Proposed:\n{plan_md}")) # Commented out to prevent duplicate display
+                    pass # Plan will be displayed by human_approval_node
                 elif current_plan and current_plan[0].startswith("Critical Error:"):
                     cli_console.print(Markdown(f"**PLANNING FAILED:** {current_plan[0]}"))
                     # The graph's decider should handle stopping.
@@ -176,14 +177,22 @@ def main():
                     cli_console.print(Markdown(f"**EXECUTION FAILED at step {executed_step_idx+1}.**"))
                     # Graph's decider should handle stopping.
 
-        # After stream finishes, get the final accumulated state
-        # This invoke might be redundant if the stream correctly processes all events and
-        # the final state can be inferred, but it's safer for now.
-        final_graph_state = buddy_app.invoke(initial_state, {"recursion_limit": 25})
-        logging.debug(f"Raw final graph state from invoke: {final_graph_state}")
+        # After stream finishes, initial_state holds the accumulated state.
+        # The stream itself should drive the graph to completion or an error state.
+        # A redundant invoke call here can re-trigger input nodes if the graph
+        # didn't definitively END for all paths during the stream.
+        final_graph_state = initial_state # Use the accumulated state from the stream
+        logging.debug(f"Final accumulated graph state from stream: {final_graph_state}")
+        # final_graph_state = buddy_app.invoke(initial_state, {"recursion_limit": 25}) # Commented out: Redundant and can cause re-prompts
+        # logging.debug(f"Raw final graph state from invoke: {final_graph_state}") # Commented out
 
     except Exception as e:
-        logging.error(f"Error during graph invocation: {e}", exc_info=True)
+        # If an exception occurred during the stream, final_graph_state might not have been assigned from initial_state
+        # or initial_state itself might be in an inconsistent state.
+        # The 'final_graph_state' variable is initialized to None before this try-catch block,
+        # so it will remain None if an exception happens before assignment from initial_state.
+        # This is handled by the 'if final_graph_state:' check later.
+        logging.error(f"Error during graph streaming or final state assignment: {e}", exc_info=True)
         cli_console.print(Markdown(f"\n**CRITICAL ERROR during graph execution:** {e}. Check logs."))
         # final_graph_state remains as it was before this exception or None if not set
 
