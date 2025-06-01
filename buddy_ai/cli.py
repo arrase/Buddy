@@ -37,6 +37,7 @@ def main():
                         help="User objective, instructions, or a path to a text file containing them.")
     parser.add_argument("--context", type=str,
                         help="Path to a file or directory to provide as context to the agent.")
+    parser.add_argument("--auto", action="store_true", help="Enable auto mode, bypassing human plan approval.")
     args = parser.parse_args()
 
     logging.info("Loading application configuration...")
@@ -102,7 +103,13 @@ def main():
     initial_state = {
         "objective": prompt_input,
         "context": context_input_str if context_input_str and not context_input_str.startswith("Error:") else "",
-        "plan": None, "current_step_index": 0, "step_results": [], "final_output": None
+        "plan": None,
+        "current_step_index": 0,
+        "step_results": [],
+        "final_output": None,
+        "user_feedback": None,
+        "plan_approved": False,
+        "auto_approve": args.auto
     }
 
     cli_console.print(Markdown("\n# --- Buddy AI Workflow Starting ---"))
@@ -125,6 +132,19 @@ def main():
                 elif current_plan and current_plan[0].startswith("Critical Error:"):
                     cli_console.print(Markdown(f"**PLANNING FAILED:** {current_plan[0]}"))
                     # The graph's decider should handle stopping.
+
+            if "human_approval" in event:
+                # The human_approval_node itself will handle input if not auto_approve.
+                # We just update the local state copy for clarity if needed,
+                # and inform the user if interaction is expected.
+                current_graph_state_from_event = event["human_approval"]
+                initial_state.update(current_graph_state_from_event) # Keep our local state synced
+
+                if not initial_state.get("auto_approve") and not initial_state.get("plan_approved") and not initial_state.get("user_feedback"):
+                    cli_console.print(Markdown("--- \n*Waiting for human approval (Approve/Refine/Cancel)...*"))
+                elif initial_state.get("auto_approve") and initial_state.get("plan_approved"):
+                    cli_console.print(Markdown("--- \n*Plan auto-approved.*"))
+
 
             if "executor" in event:
                 executed_step_idx = event["executor"].get("current_step_index", 1) -1
@@ -158,39 +178,80 @@ def main():
     if final_graph_state:
         cli_console.print(Markdown("\n# --- Buddy AI Workflow Complete ---"))
         final_plan = final_graph_state.get('plan', [])
+        plan_approved = final_graph_state.get('plan_approved', False)
+        user_feedback = final_graph_state.get('user_feedback')
+
         if final_plan and isinstance(final_plan, list) and len(final_plan) > 0 and final_plan[0].startswith("Critical Error:"):
-            cli_console.print(Markdown(f"**Workflow ended due to planner error:** {final_plan[0]}"))
+            cli_console.print(Markdown(f"**Workflow ended due to PLANNER error:** {final_plan[0]}"))
+        elif not plan_approved and not user_feedback and not final_graph_state.get("auto_approve"):
+            # This condition implies cancellation before plan execution if not in auto_approve mode
+            # and the plan itself wasn't a critical error from the start.
+            # It also assumes 'END' was reached without plan_approved being True.
+            if not (final_plan and isinstance(final_plan, list) and len(final_plan) > 0 and final_plan[0].startswith("Critical Error:")):
+                 cli_console.print(Markdown("**Workflow ended: Plan was not approved and no feedback was provided (cancelled).**"))
+            # If it was a critical error in the plan, that message is already shown or will be.
         else:
             final_step_results = final_graph_state.get('step_results', [])
             if final_step_results:
-                # Check if the last step result (which is a string) indicates critical error
                 if isinstance(final_step_results[-1], str) and final_step_results[-1].startswith("Critical Error:"):
-                     cli_console.print(Markdown(f"**Workflow ended due to executor error:** {final_step_results[-1]}"))
-                else:
+                     cli_console.print(Markdown(f"**Workflow ended due to EXECUTOR error:** {final_step_results[-1]}"))
+                elif not plan_approved and final_graph_state.get("auto_approve"):
+                    # If auto_approve was on, but plan_approved is false, it implies an issue within human_approval_node or subsequent logic.
+                    # This case might be redundant if human_approval_node handles its errors cleanly.
+                    cli_console.print(Markdown("**Workflow ended: Plan was not auto-approved despite --auto flag. Check agent logic.**"))
+                elif plan_approved: # Only show consolidated output if plan was approved and ran
                     cli_console.print(Markdown("## --- Consolidated Output from All Steps ---"))
                     str_step_results = [str(res) for res in final_step_results]
                     final_consolidated_output = "\n\n---\n\n".join(str_step_results)
                     cli_console.print(Markdown(final_consolidated_output))
+                # If user_feedback is present, it implies it went to replan and then potentially ended.
+                # The outcome of that replan (new plan, approval etc.) would be part of the loop.
+                # If it ends with user_feedback still set, it's an unusual state, perhaps an error in graph logic.
+                elif user_feedback:
+                     cli_console.print(Markdown("**Workflow ended after user feedback was provided, but before further resolution. Check logs.**"))
+
+            elif plan_approved: # Plan was approved but no steps were executed or no results.
+                cli_console.print(Markdown("*Plan was approved, but no step results were recorded.*"))
+            elif not plan_approved and not user_feedback and final_graph_state.get("auto_approve"):
+                # Similar to above, if auto_approve was on but plan not approved.
+                cli_console.print(Markdown("*Workflow ended: Plan was not auto-approved despite --auto flag and no steps executed. Check agent logic.*"))
+            elif not plan_approved and not user_feedback : # General catch for other non-approved, non-feedback scenarios
+                 pass # Already handled by the "Plan was not approved and no feedback was provided" message earlier.
             else:
-                cli_console.print(Markdown("*No step results, or workflow ended before execution.*"))
+                cli_console.print(Markdown("*No step results, or workflow ended before execution for other reasons.*"))
     else:
-        cli_console.print(Markdown("\n**Graph execution failed or did not produce a final state.** See logs."))
+        cli_console.print(Markdown("\n**Graph execution failed critically or did not produce a final state.** See logs."))
 
     logging.info("Buddy application finished.")
-    # Determine exit code based on success/failure
-    # A successful run means final_graph_state is not None, and no critical errors in plan or last step result.
+
+    # Determine exit code
     successful_run = False
     if final_graph_state:
         plan_ok = not (final_graph_state.get('plan') and final_graph_state['plan'][0].startswith("Critical Error:"))
-        results_ok = not (final_graph_state.get('step_results') and \
-                          isinstance(final_graph_state['step_results'][-1], str) and \
-                          final_graph_state['step_results'][-1].startswith("Critical Error:"))
-        if plan_ok and results_ok:
-            successful_run = True
+        # If plan was never approved (and not in auto_approve mode where approval is implicit for execution path)
+        # then it's not a "successful run" in terms of execution.
+        approved_for_execution = final_graph_state.get('plan_approved', False) or final_graph_state.get('auto_approve', False)
+
+        last_step_result = final_graph_state.get('step_results', [])
+        results_ok = not (last_step_result and \
+                          isinstance(last_step_result[-1], str) and \
+                          last_step_result[-1].startswith("Critical Error:"))
+
+        # Objective met would be the ideal success, but for now, focus on error-free execution if approved
+        # objective_met = final_graph_state.get("objective_met", False) # Assuming this might be added later
+
+        if plan_ok and approved_for_execution and results_ok : # and objective_met (ideally)
+            # If it was cancelled by user, it's not a "successful run" even if no technical errors
+            if not (not final_graph_state.get("plan_approved") and \
+                    not final_graph_state.get("user_feedback") and \
+                    not final_graph_state.get("auto_approve")):
+                successful_run = True
 
     if successful_run:
+        cli_console.print(Markdown("--- \n**Workflow concluded successfully (no critical errors during execution).**"))
         sys.exit(0)
     else:
+        cli_console.print(Markdown("--- \n**Workflow concluded with errors or was cancelled.**"))
         sys.exit(1)
 
 if __name__ == "__main__":

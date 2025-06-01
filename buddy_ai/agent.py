@@ -8,7 +8,15 @@ from langgraph.graph import StateGraph, END
 from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
-# Rich console is managed by CLI module
+from rich.markdown import Markdown # Added for printing plan
+try:
+    # Attempt direct import first
+    from .cli import cli_console
+except ImportError:
+    # Fallback if direct import causes issues (e.g. during testing or if cli.py not fully initialized)
+    import buddy_ai.cli as buddy_cli
+    cli_console = buddy_cli.cli_console
+
 
 # --- Pydantic Models and TypedDicts for Graph State ---
 class Plan(BaseModel):
@@ -28,6 +36,9 @@ class BuddyGraphState(TypedDict):
     current_step_index: int
     step_results: Annotated[List[str], operator.add]
     final_output: Optional[str]
+    user_feedback: Optional[str] = None
+    plan_approved: bool = False
+    auto_approve: bool = False
 
 # --- Global Variables for LLMs and Agent (to be initialized by CLI) ---
 _planner_llm_structured: Optional[ChatGoogleGenerativeAI] = None
@@ -79,6 +90,7 @@ _REPLANNER_PROMPT_TEMPLATE = (
     "User Objective: {objective}\n"
     "Previous Plan:\n{previous_plan}\n"
     "Execution History of Previous Plan (step-by-step results):\n{step_results_formatted}\n"
+    "User Feedback for Refinement:\n{user_feedback}\n"
     "Context (if any):\n{context}\n\n"
     "Key Guidelines for Plan Steps (same as planner - ensure shell commands, reporting, verification etc.):\n"
     "1.  **Shell Command Syntax:** Each action step must be a valid shell command. E.g., `ls -la`.\n"
@@ -139,7 +151,7 @@ def planner_node(state: BuddyGraphState) -> dict:
     except Exception as e:
         logging.error(f"Error invoking structured planner LLM: {e}", exc_info=True)
         plan_steps = [f"Critical Error: Exception during planning - {str(e)}"]
-    return {"plan": plan_steps, "current_step_index": 0, "step_results": []}
+    return {"plan": plan_steps, "current_step_index": 0, "step_results": [], "plan_approved": False, "user_feedback": None}
 
 def executor_node(state: BuddyGraphState) -> dict:
     current_idx = state.get("current_step_index", 0)
@@ -197,6 +209,7 @@ def replanner_node(state: BuddyGraphState) -> dict:
         objective=objective,
         previous_plan=previous_plan_str,
         step_results_formatted=step_results_formatted,
+        user_feedback=state.get("user_feedback", "No specific feedback provided."),
         context=context if context else "No additional context provided."
     )
     logging.debug(f"Replanner input prompt: {formatted_prompt}")
@@ -217,7 +230,84 @@ def replanner_node(state: BuddyGraphState) -> dict:
         logging.error(f"Error invoking structured planner LLM for replan: {e}", exc_info=True)
         new_plan_steps = [f"Critical Error: Exception during replanning - {str(e)}"]
 
-    return {"plan": new_plan_steps, "current_step_index": 0}
+    return {"plan": new_plan_steps, "current_step_index": 0, "user_feedback": None, "plan_approved": False}
+
+# --- Human Approval Node ---
+def human_approval_node(state: BuddyGraphState) -> dict:
+    logging.info("Entering human_approval_node.")
+    auto_approve = state.get("auto_approve", False)
+
+    # Initialize return state keys to avoid partial updates if logic exits early
+    current_plan_approved = False
+    current_user_feedback = None
+
+    if auto_approve:
+        logging.info("Auto-approving plan.")
+        current_plan_approved = True
+        return {"plan_approved": current_plan_approved, "user_feedback": current_user_feedback}
+
+    # If not auto_approve, proceed with interactive approval.
+    # This node now handles the input directly.
+    plan = state.get("plan")
+
+    # Check for critical errors in the plan itself before asking for approval
+    if not plan or not isinstance(plan, list) or not plan[0] or plan[0].startswith("Critical Error:"):
+        logging.error(f"Human approval node: Critical error in plan, cannot proceed with approval. Plan: {plan}")
+        # This state will be caught by decide_after_approval to go to END
+        return {"plan_approved": False, "user_feedback": None, "plan": plan}
+
+
+    plan_md = "\n".join(f"{i+1}. {step}" for i, step in enumerate(plan))
+    cli_console.print(Markdown(f"## Proposed Execution Plan:\n{plan_md}"))
+
+    while True:
+        try:
+            raw_input = cli_console.input("[bold yellow]Plan Review[/bold yellow]: ([bold green]A[/bold green])pprove, ([bold blue]R[/bold blue])efine, or ([bold red]C[/bold red])ancel plan? ").strip().lower()
+        except KeyboardInterrupt: # Handle Ctrl+C as cancellation
+            logging.warning("User cancelled via KeyboardInterrupt during plan approval.")
+            raw_input = 'c' # Treat as cancel
+
+        if raw_input == 'a':
+            logging.info("Plan approved by user.")
+            current_plan_approved = True
+            current_user_feedback = None
+            break
+        elif raw_input == 'r':
+            logging.info("User chose to refine the plan.")
+            while True:
+                try:
+                    feedback = cli_console.input("Please provide feedback for replanning: ").strip()
+                    if feedback:
+                        current_user_feedback = feedback
+                        current_plan_approved = False
+                        logging.info(f"User feedback for replan: {feedback}")
+                        break
+                    else:
+                        cli_console.print("[bold red]Feedback cannot be empty if you choose to refine. Please provide your comments or (C)ancel refinement.[/bold red]")
+                        # Allow cancelling the refinement input
+                        sub_choice = cli_console.input("Enter feedback or (C)ancel refinement: ").strip().lower()
+                        if sub_choice == 'c':
+                            # Effectively cancels the 'refine' choice, re-prompt A/R/C
+                            # To do this, we need to break this inner loop and continue outer
+                            current_user_feedback = None # Ensure no partial feedback
+                            break
+                except KeyboardInterrupt:
+                    logging.warning("User cancelled refinement input via KeyboardInterrupt.")
+                    current_user_feedback = None # Ensure no partial feedback
+                    break # Break inner loop, will continue outer loop
+            if current_user_feedback is not None: # Feedback was successfully provided
+                break # Break outer loop
+            # If feedback was cancelled, the outer loop continues to re-ask A/R/C
+
+        elif raw_input == 'c':
+            logging.info("Plan cancelled by user.")
+            current_plan_approved = False
+            current_user_feedback = None
+            break
+        else:
+            cli_console.print("[bold red]Invalid input. Please enter 'A', 'R', or 'C'.[/bold red]")
+
+    return {"plan_approved": current_plan_approved, "user_feedback": current_user_feedback}
 
 
 def should_continue_decider(state: BuddyGraphState) -> str:
@@ -315,28 +405,60 @@ def create_buddy_graph() -> StateGraph:
     workflow = StateGraph(BuddyGraphState)
     workflow.add_node("planner", planner_node)
     workflow.add_node("executor", executor_node)
-    workflow.add_node("replanner", replanner_node) # NEW node
+    workflow.add_node("replanner", replanner_node)
+    workflow.add_node("human_approval", human_approval_node) # New node
+
     workflow.set_entry_point("planner")
+
+    # Planner to Human Approval
+    workflow.add_edge("planner", "human_approval")
+
+    # Human Approval conditional logic
+    def decide_after_approval(state: BuddyGraphState) -> str:
+        logging.info("Entering decide_after_approval.")
+        plan_approved = state.get("plan_approved", False)
+        user_feedback = state.get("user_feedback")
+        plan = state.get("plan", [])
+
+        if plan and plan[0].startswith("Critical Error:"):
+             logging.error(f"Critical error from planner: {plan[0]}")
+             return "END" # Or a specific error handling node
+
+        if plan_approved:
+            logging.info("Plan approved. Proceeding to executor.")
+            return "executor"
+        elif user_feedback: # and not plan_approved (implicit)
+            logging.info("User feedback provided. Proceeding to replanner.")
+            return "replanner"
+        else: # Not approved, no feedback (e.g. user cancelled)
+            logging.info("Plan not approved and no feedback. Ending.")
+            return END # Or a specific "cancelled" node
+
     workflow.add_conditional_edges(
-        "planner", should_continue_decider,
+        "human_approval",
+        decide_after_approval,
         {
-            "continue_to_executor": "executor",
-            "replan": "replanner",
-            "objective_achieved": END,
-            "critical_error": END
+            "executor": "executor",
+            "replanner": "replanner",
+            END: END
         }
     )
+
+    # Executor to should_continue_decider
     workflow.add_conditional_edges(
-        "executor", should_continue_decider,
+        "executor",
+        should_continue_decider, # This decider now primarily handles post-execution logic
         {
-            "continue_to_executor": "executor",
-            "replan": "replanner",
+            "continue_to_executor": "executor", # This path should ideally not be hit if plan is single step. If plan has multiple steps, this is fine.
+            "replan": "replanner", # If assessment suggests replan
             "objective_achieved": END,
-            "critical_error": END
+            "critical_error": END # If assessment or execution had critical error
         }
     )
-    # Add transition for the replanner node
-    workflow.add_edge("replanner", "executor")
+
+    # Replanner back to Human Approval
+    workflow.add_edge("replanner", "human_approval")
+
     app = workflow.compile()
     logging.info("StateGraph compiled successfully.")
     return app
