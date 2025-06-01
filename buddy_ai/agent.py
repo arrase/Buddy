@@ -433,11 +433,11 @@ def create_buddy_graph() -> StateGraph:
         plan_has_critical_error = not plan or not isinstance(plan, list) or not plan[0] or plan[0].startswith("Critical Error:")
         logging.debug(f"State for decide_after_approval: plan_approved={plan_approved}, user_feedback_present={bool(user_feedback)}, plan_has_critical_error={plan_has_critical_error})")
 
-        next_node_name = "END" # Default to END
+        next_node_name = END # Default to END
 
         if plan_has_critical_error:
              logging.error(f"Critical error in plan detected by decide_after_approval: {plan[0] if plan and isinstance(plan, list) and plan[0] else 'Plan is empty or invalid'}")
-             next_node_name = "END"
+             next_node_name = END
         elif plan_approved:
             # logging.info("Plan approved. Proceeding to executor.") # Logged before returning route
             next_node_name = "executor"
@@ -446,9 +446,9 @@ def create_buddy_graph() -> StateGraph:
             next_node_name = "replanner"
         else: # Not approved, no feedback (e.g. user cancelled)
             # logging.info("Plan not approved and no feedback. Ending.") # Logged before returning route
-            next_node_name = "END"
+            next_node_name = END
 
-        logging.info(f"Routing from human_approval_node to: {next_node_name}")
+        logging.info(f"Routing from human_approval_node to: {'END' if next_node_name is END else next_node_name}")
         return next_node_name
 
     workflow.add_conditional_edges(
