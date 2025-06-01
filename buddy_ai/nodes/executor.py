@@ -4,7 +4,6 @@ from langchain_core.messages import HumanMessage
 # Import BuddyGraphState from the __init__.py in the same directory
 from . import BuddyGraphState
 from .. import shared_instances as executor_shared_instances # Alias for clarity
-# from ..shared_instances import _executor_agent_runnable_global
 
 
 def executor_node(state: BuddyGraphState) -> dict:
