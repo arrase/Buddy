@@ -14,7 +14,7 @@ from .nodes.deciders import should_continue_decider, decide_after_approval
 from . import shared_instances
 
 
-def create_llm_instance(model_name: str, llm_type: str, api_key: Optional[str] = None) -> Optional[ChatGoogleGenerativeAI]:
+def create_llm_instance(model_name: str, llm_type: str) -> Optional[ChatGoogleGenerativeAI]:
     try:
         llm = ChatGoogleGenerativeAI(model=model_name, temperature=0)
         logging.info(f"{llm_type} LLM created successfully using {model_name}.")
