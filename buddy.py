@@ -10,6 +10,9 @@ from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, List, Annotated
+from rich.console import Console # Added for Rich output
+from rich.markdown import Markdown # Added for Rich output
+from rich.panel import Panel # Added for Rich security warning
 
 # 1. Imports and Setup
 GOOGLE_API_KEY = "AIzaSyDtdc1YKLn3INvgrHX_LOIKXz1SRf36irU"  # Replace with your actual key if necessary
@@ -26,6 +29,9 @@ class PlanExecuteState(TypedDict):
 # 3. Initialize LLM
 # Global LLM variable, will be initialized in main after API key check
 llm = None
+
+# Rich Console
+console = Console()
 
 # Agent's Current Working Directory
 AGENT_WORKING_DIRECTORY = os.getcwd()
@@ -67,16 +73,18 @@ def execute_shell_command(command: str) -> str:
 
             if os.path.isdir(new_dir):
                 AGENT_WORKING_DIRECTORY = new_dir
-                success_msg = f"Changed virtual working directory to: {AGENT_WORKING_DIRECTORY}"
-                print(success_msg)
-                return success_msg
+                success_msg = f":heavy_check_mark: Changed virtual working directory to: `{AGENT_WORKING_DIRECTORY}`"
+                console.print(Markdown(success_msg)) # Internal print
+                return success_msg # Return this for execute_step to render
             else:
-                error_msg = f"Error: Directory not found or not a directory: {new_dir} (from CWD: {AGENT_WORKING_DIRECTORY})"
-                print(error_msg)
-                return error_msg
+                error_msg = f":x: Error changing directory: `{new_dir}` is not a valid directory (from CWD: `{AGENT_WORKING_DIRECTORY}`)."
+                console.print(Markdown(error_msg)) # Internal print
+                return error_msg # Return this
 
         # For other commands, execute in AGENT_WORKING_DIRECTORY
-        print(f"Attempting to execute shell command: '{command}' in directory '{AGENT_WORKING_DIRECTORY}'")
+        # Internal print before execution:
+        console.print(f"Executing: `{command}` in CWD: `{AGENT_WORKING_DIRECTORY}`")
+
         process = subprocess.run(
             command,
             shell=True, # Still using shell=True for convenience; be mindful of security.
@@ -87,32 +95,41 @@ def execute_shell_command(command: str) -> str:
             cwd=AGENT_WORKING_DIRECTORY # Use the agent's current working directory
         )
 
-        output = ""
-        if process.stdout:
-            output += f"Stdout:\n{process.stdout.strip()}"
-        if process.stderr:
-            if process.stdout.strip(): # Check if stdout had actual content
-                output += "\n"
-            output += f"Stderr:\n{process.stderr.strip()}"
+        # Construct the return string with Markdown formatting
+        output_parts = []
+        stdout_content = process.stdout.strip()
+        stderr_content = process.stderr.strip()
 
-        if not output.strip() and process.returncode == 0: # Check if output is effectively empty
-            output = "Command executed successfully with no output."
-        elif not output.strip() and process.returncode != 0:
-            output = f"Command failed with return code {process.returncode} and no output."
+        if stdout_content:
+            output_parts.append(f"**Stdout:**\n```text\n{stdout_content}\n```")
+        if stderr_content:
+            output_parts.append(f"**Stderr:**\n```text\n{stderr_content}\n```")
 
+        if not output_parts and process.returncode == 0:
+            output_parts.append("*Command executed successfully with no output.*")
 
-        full_log = f"Command: '{command}', CWD: '{AGENT_WORKING_DIRECTORY}', Return Code: {process.returncode}, Output:\n{output.strip()}"
-        print(full_log)
-        return output.strip()
+        # Add return code information if it's non-zero, or if it succeeded with no textual output (already covered)
+        # or if there was stderr even on success.
+        if process.returncode != 0:
+            output_parts.append(f"**Return Code:** `{process.returncode}`")
+        elif not output_parts and process.returncode !=0 : # Should be covered by the one above.
+             output_parts.append(f"*Command failed with return code {process.returncode} and no output.*")
+
+        returned_output_string = "\n\n".join(output_parts).strip()
+
+        # Internal log of what's being returned (optional, can be verbose)
+        # console.print(Markdown(f"*Shell tool returning to executor:*\n{returned_output_string}"))
+
+        return returned_output_string
 
     except subprocess.TimeoutExpired:
-        error_message = f"Error: Command '{command}' timed out after 30 seconds (CWD: {AGENT_WORKING_DIRECTORY})."
-        print(error_message)
-        return error_message
+        error_message_md = f":x: **Timeout Error:** Command `{command}` timed out after 30 seconds (CWD: `{AGENT_WORKING_DIRECTORY}`)."
+        console.print(Markdown(error_message_md)) # Internal print
+        return error_message_md # Return this for execute_step
     except Exception as e:
-        error_message = f"Error executing command '{command}' (CWD: {AGENT_WORKING_DIRECTORY}): {e}"
-        print(error_message)
-        return error_message
+        error_message_md = f":x: **Execution Error:** While running `{command}` (CWD: `{AGENT_WORKING_DIRECTORY}`): `{e}`"
+        console.print(Markdown(error_message_md)) # Internal print
+        return error_message_md # Return this
 
 shell_tool = Tool(
     name="ShellCommandExecutor",
@@ -221,8 +238,13 @@ def execute_step(state: PlanExecuteState):
     past_steps_formatted = "\n".join([f"Step: {ps[0]}\nResult: {ps[1]}" for ps in state['past_steps']]) \
         if state['past_steps'] else "No steps executed yet."
 
-    print(f"\n--- Executing Step {state['next_step_index'] + 1} ---")
-    print(f"Action: {current_step_description}")
+    step_number = state['next_step_index'] + 1
+    # Use a rule to separate steps, including a truncated step description for context
+    rule_title = f"[bold cyan]Executing Step {step_number}: {current_step_description[:70]}{'...' if len(current_step_description) > 70 else ''}"
+    console.rule(rule_title)
+    # Optionally, print the full action if needed, but it's in the rule.
+    # console.print(Markdown(f"**Full Action:** {current_step_description}"))
+
 
     step_output: str
     try:
@@ -260,15 +282,15 @@ def execute_step(state: PlanExecuteState):
 
                 # Validate the command.
                 if command and isinstance(command, str):
-                    print(f"EXECUTOR: Identified shell command: '{command}' for step: '{current_step_description}' (Tool: {shell_tool.name})")
+                    console.print(Markdown(f"Executing shell command: `{command}`"))
                     step_output = shell_tool.run(command) # Execute the command.
                 elif command: # Command is present but not a string.
                      error_msg = f"Error: {shell_tool.name} was called, but 'command_to_run' was not a valid string: Got '{command}' (type: {type(command).__name__})."
-                     print(error_msg)
+                     console.print(Markdown(f"**Shell Tool Error:** {error_msg}"))
                      step_output = error_msg
                 else: # Command is missing.
                     error_msg = f"Error: {shell_tool.name} was called, but no 'command_to_run' was provided."
-                    print(error_msg)
+                    console.print(Markdown(f"**Shell Tool Error:** {error_msg}"))
                     step_output = error_msg
             else:
                 # It was valid JSON, but not a request for the ShellCommandExecutor tool.
@@ -279,15 +301,19 @@ def execute_step(state: PlanExecuteState):
             step_output = raw_executor_response
         except Exception as e:
             # Catch any other errors during the parsing or tool logic.
-            print(f"Error processing executor response or during tool call attempt: {e}")
+            error_text = f"Error processing executor response or during tool call attempt: {e}"
+            console.print(Markdown(f"**Execution Error:** {error_text}"))
             step_output = f"Error during step execution logic: {e}"
 
     except Exception as e: # Catch errors from the LLM call itself.
-        print(f"Error during executor LLM call for step '{current_step_description}': {e}")
+        error_text = f"Error during executor LLM call for step '{current_step_description}': {e}"
+        console.print(Markdown(f"**LLM Call Error:** {error_text}"))
         step_output = f"Error executing step (LLM call failed): {e}"
 
-    print(f"Result: {step_output}")
-    print("--------------------------")
+    console.print(Markdown("**Result:**"))
+    console.print(Markdown(step_output if step_output.strip() else "*No output from step.*"))
+    # console.print("--------------------------") # Replaced by console.rule at the start of next step or final summary
+    console.print("") # Add a blank line for spacing
 
     updated_past_steps = state['past_steps'] + [(current_step_description, step_output)]
     next_index = state['next_step_index'] + 1
@@ -319,17 +345,34 @@ def plan_step(state: PlanExecuteState):
             print("Warning: Planner produced an empty plan or parsing failed.")
             # Provide a default or error plan
             generated_plan = ["No actionable steps identified by the planner or plan was empty."]
+            console.print(Markdown("*Planner Warning: No actionable steps identified or plan was empty.*"))
+
 
     except Exception as e:
-        print(f"Error during planner LLM call or plan parsing: {e}")
+        error_msg = f"Error during planner LLM call or plan parsing: {e}"
+        console.print(Markdown(f"# Plan Generation Failed\n\n**Error:** {error_msg}"))
         # Return a state that indicates failure
         generated_plan = [f"Failed to generate a plan due to an error: {e}"]
         return {"plan": generated_plan, "next_step_index": 0, "past_steps": []}
 
-    print("\n--- Generated Plan ---")
-    for i, step_item in enumerate(generated_plan):
-        print(f"{i+1}. {step_item}")
-    print("----------------------")
+    console.rule("[bold cyan]Execution Plan")
+    if generated_plan and not (len(generated_plan) == 1 and "Failed to generate a plan" in generated_plan[0]):
+        # Prepare the plan as a numbered list in a single Markdown string
+        markdown_plan_str = "\n".join([f"{i+1}. {step}" for i, step in enumerate(generated_plan)])
+        console.print(Markdown(markdown_plan_str))
+    elif not generated_plan: # Should be caught by earlier logic, but as a safeguard
+        console.print(Markdown("*No plan steps were generated.*"))
+    # If plan generation failed, the error is already printed above.
+    # No need to print "Failed to generate plan..." again unless it's the only content of generated_plan
+    elif len(generated_plan) == 1 and "Failed to generate a plan" in generated_plan[0] and "Error:" not in generated_plan[0]:
+         # This case is when the generated_plan literally is ["Failed to generate a plan due to an error: {e}"]
+         # but the detailed error was already printed by the except block.
+         # So we just print the plan title and the single error message if it wasn't the detailed one.
+         # console.print(Markdown(generated_plan[0])) # Already printed by the except block more clearly
+         pass
+
+
+    console.print("") # Add a blank line for spacing after the plan
 
     # Initialize past_steps here to ensure it's always present in the state
     # even if planning is the first step after a restart/retry.
@@ -367,66 +410,70 @@ def read_file_content(filepath: str) -> str:
         with open(filepath, 'r', encoding='utf-8') as f:
             return f.read()
     except FileNotFoundError:
-        print(f"Error: File not found at {filepath}")
+        console.print(Markdown(f":x: [bold red]File Read Error:[/bold red] File not found at `{filepath}`"))
         sys.exit(1)
     except IOError as e:
-        print(f"Error reading file {filepath}: {e}")
+        console.print(Markdown(f":x: [bold red]File Read Error:[/bold red] Error reading file `{filepath}`: {e}"))
         sys.exit(1)
 
 def read_directory_content(dir_path: str) -> str:
     """Recursively reads content of all files in a directory."""
     if not os.path.isdir(dir_path):
-        print(f"Error: Directory not found at {dir_path}")
+        console.print(Markdown(f":x: [bold red]Directory Read Error:[/bold red] Directory not found at `{dir_path}`"))
         sys.exit(1)
 
+    console.print(Markdown(f":mag: Reading content from directory: `{dir_path}`"), style="dim")
     all_content = []
-    for root, _, files in os.walk(dir_path):
-        for file in files:
-            filepath = os.path.join(root, file)
+    for root, _, files_in_dir in os.walk(dir_path): # Renamed 'files' to 'files_in_dir'
+        for file_name in files_in_dir: # Renamed 'file' to 'file_name'
+            filepath = os.path.join(root, file_name)
             try:
+                console.print(Markdown(f"...reading `{filepath}`"), style="dim")
                 file_content = read_file_content(filepath)
-                all_content.append(f"\n--- Content from {filepath} ---\n{file_content}")
-            except Exception as e: # Catching generic exception from read_file_content
-                print(f"Skipping file {filepath} due to error: {e}")
-                # Optionally, decide if this should halt execution or just skip the file
+                # Format context for better readability when presented to LLM or in logs
+                all_content.append(f"\n**Source: `{filepath}`**\n```text\n{file_content}\n```")
+            except SystemExit: # Propagate SystemExit from read_file_content
+                raise
+            except Exception as e:
+                console.print(Markdown(f":warning: Skipping file `{filepath}` due to error: {e}"), style="yellow")
     return "\n".join(all_content)
 
 # 8. Main Execution Logic
 if __name__ == "__main__":
-    # ---- ADD WARNING START ----
-    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-    print("!!! WARNING: Buddy AI Agent - Shell Command Execution      !!!")
-    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-    print("This agent can execute shell commands generated by an AI model.")
-    print("Executing AI-generated commands can be DANGEROUS and may lead to:")
-    print("- Unintended system modifications")
-    print("- Data loss or corruption")
-    print("- Security vulnerabilities")
-    print("ALWAYS review the generated plan and the specific commands before execution if possible,")
-    print("and only run this agent in a safe, isolated environment if you are unsure.")
-    print("You are responsible for any actions taken by this agent.")
-    print("--------------------------------------------------------------")
-    # ---- ADD WARNING END ----
+    # Security Warning
+    warning_title = "[bold red]!!! WARNING: Buddy AI Agent - Shell Command Execution !!![/bold red]"
+    warning_message = (
+        "This agent can execute shell commands generated by an AI model.\n"
+        "Executing AI-generated commands can be [bold red]DANGEROUS[/bold red] and may lead to:\n"
+        "- Unintended system modifications\n"
+        "- Data loss or corruption\n"
+        "- Security vulnerabilities\n\n"
+        "ALWAYS review the generated plan and the specific commands before execution if possible, "
+        "and only run this agent in a safe, isolated environment if you are unsure.\n"
+        "[italic]You are responsible for any actions taken by this agent.[/italic]"
+    )
+    console.print(Panel(Markdown(warning_message), title=warning_title, border_style="red", expand=False))
+    console.print("") # For spacing
 
     # API Key Check
     if not GOOGLE_API_KEY:
-        print("Error: GOOGLE_API_KEY is not set. Please set it in the script or as an environment variable.")
+        console.print(Markdown(":x: [bold red]Error:[/bold red] `GOOGLE_API_KEY` is not set. Please set it in the script or as an environment variable."), style="red")
         sys.exit(1)
 
     # Initialize LLM after key check
     try:
         llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", google_api_key=GOOGLE_API_KEY, convert_system_message_to_human=True)
+        console.print(Markdown(f":robot: LLM initialized with `gemini-2.5-flash-preview-04-17`."), style="dim")
     except Exception as e:
-        print(f"Error initializing LLM (gemini-2.5-flash-preview-04-17): {e}")
-        print("Attempting to initialize with 'gemini-pro' as a fallback...")
+        console.print(Markdown(f":warning: Error initializing LLM with `gemini-2.5-flash-preview-04-17`: {e}. Attempting fallback..."), style="yellow")
         try:
             llm = ChatGoogleGenerativeAI(model="gemini-pro", google_api_key=GOOGLE_API_KEY, convert_system_message_to_human=True)
+            console.print(Markdown(f":robot: LLM initialized with fallback `gemini-pro`."), style="dim")
         except Exception as e_pro:
-            print(f"Error initializing LLM (gemini-pro): {e_pro}")
-            print("LLM initialization failed. Please check your API key and model availability.")
+            console.print(Markdown(f":x: [bold red]LLM Initialization Failed:[/bold red] Error with `gemini-pro` as well: {e_pro}. Please check API key and model availability."), style="red")
             sys.exit(1)
 
-    parser = argparse.ArgumentParser(description="Buddy Agent: A helpful AI assistant.")
+    parser = argparse.ArgumentParser(description="Buddy Agent: A helpful AI assistant, enhanced with Rich output.")
     parser.add_argument(
         "-p", "--prompt",
         required=True,
@@ -445,83 +492,77 @@ if __name__ == "__main__":
     user_prompt: str
     try:
         if os.path.isfile(prompt_input):
-            print(f"Reading prompt from file: {prompt_input}")
+            console.print(Markdown(f":page_facing_up: Reading prompt from file: `{prompt_input}`"), style="dim")
             user_prompt = read_file_content(prompt_input)
         else:
-            user_prompt = prompt_input
-    except Exception as e:
-        print(f"Failed to read prompt: {e}")
+            user_prompt = prompt_input # Use input directly as prompt
+    except Exception as e: # read_file_content now exits on error, this is a fallback
+        console.print(Markdown(f":x: [bold red]Failed to read prompt:[/bold red] {e}"), style="red")
         exit(1)
 
     # Process Context
     context_input = args.context
     context_data = ""
     if context_input:
-        print(f"Loading context from: {context_input}")
+        # console.print(Markdown(f":file_folder: Loading context from: `{context_input}`"), style="dim") # Done by read_directory_content
         try:
             if os.path.isfile(context_input):
                 context_data = read_file_content(context_input)
             elif os.path.isdir(context_input):
-                context_data = read_directory_content(context_input)
+                context_data = read_directory_content(context_input) # This now prints its own status
             else:
-                print(f"Warning: Context path '{context_input}' is not a valid file or directory. Proceeding without context.")
-        except Exception as e:
-            print(f"Failed to load context from {context_input}: {e}. Proceeding without context.")
-            context_data = "" # Ensure context_data is empty on error
+                console.print(Markdown(f":warning: Context path `{context_input}` is not a valid file or directory. Proceeding without context."), style="yellow")
+        except Exception as e: # read_file_content/read_directory_content exit on error, this is a fallback
+            console.print(Markdown(f":x: [bold red]Failed to load context from `{context_input}`:[/bold red] {e}. Proceeding without context."), style="red")
+            context_data = ""
 
     # Prepare Initial State for LangGraph
     initial_state = {
         "prompt": user_prompt,
         "context": context_data,
-        # plan, past_steps, next_step_index are set by the graph
     }
 
     # User feedback
-    print("\n===================================")
-    print("    BUDDY AGENT INITIALIZING     ")
-    print("===================================")
-    print(f"\nUser Prompt: {user_prompt}")
-    context_preview = context_data[:200] + '...' if len(context_data) > 200 else context_data # Shorter preview
-    print(f"Context Provided: {'Yes' if context_data else 'No'}")
+    console.rule("[bold blue]Buddy Agent Initializing")
+    console.print(Markdown(f"**User Prompt:**\n```text\n{user_prompt}\n```"))
     if context_data:
-        # Ensure context_preview is defined here if you want to use it.
-        # For simplicity, just confirming it's loaded.
-        print(f"Context (Preview): {context_data[:200] + '...' if len(context_data) > 200 else context_data}")
-
-    print("\n--- Starting Agent Execution ---")
+        # Display only a preview if context is very long
+        context_display_limit = 1000
+        if len(context_data) > context_display_limit:
+             console.print(Markdown(f"**Context Provided (Preview):**\n```text\n{context_data[:context_display_limit]}...\n```" ))
+        else:
+             console.print(Markdown(f"**Context Provided:**\n```text\n{context_data}\n```" ))
+    else:
+        console.print(Markdown("*No context provided.*"))
+    console.print("") #Spacing
 
     # Invoke the agent. The plan and step-by-step execution will be printed by the nodes.
+    final_state = {} # Initialize to ensure it's available for summary
     try:
+        # The individual nodes (plan_step, execute_step) now handle their own Rich printing for live updates.
         final_state = app.invoke(initial_state)
     except Exception as e:
-        print(f"\n--- Agent Execution Failed ---")
-        print(f"An unexpected error occurred during agent execution: {e}")
-        # Depending on the error, parts of final_state might be available or it might be None
-        # We'll try to print what we can, or a generic message
-        final_state = {} # Ensure final_state is a dict for the summary below
-        # Potentially add more specific error state updates here if needed
+        console.print(Markdown(f"\n:x: [bold red]Agent Execution Failed Critically:[/bold red]\nAn unexpected error occurred during the main agent execution loop: {e}"))
+        # final_state will remain as it was at the point of error or empty if error was at start.
 
-    print("\n\n===================================")
-    print("    AGENT EXECUTION COMPLETE     ")
-    print("===================================")
+    console.rule("[bold green]Agent Execution Complete")
 
-    print("\n--- Final Summary ---")
-    print("Final Plan Executed:")
-    if 'plan' in final_state and final_state['plan']:
-        for i, step_content in enumerate(final_state['plan']):
-            print(f"  {i+1}. {step_content}")
+    console.print(Markdown("### Final Plan Executed:"))
+    if 'plan' in final_state and final_state.get('plan'):
+        md_final_plan = "\n".join([f"{i+1}. {step}" for i, step in enumerate(final_state['plan'])])
+        console.print(Markdown(md_final_plan if md_final_plan.strip() else "*Plan was empty or contained no actionable steps.*"))
     else:
-        print("  No plan was generated or available in the final state.")
+        console.print(Markdown("*No plan was part of the final state or it was empty.*"))
+    console.print("")
 
-    print("\nExecution History (Step: Result):")
-    if 'past_steps' in final_state and final_state['past_steps']:
+    console.print(Markdown("### Execution History:"))
+    if 'past_steps' in final_state and final_state.get('past_steps'):
         if not final_state['past_steps']:
-            print("  No steps were executed.")
+            console.print(Markdown("*No steps were executed or recorded.*"))
         for step_taken, result_of_step in final_state['past_steps']:
-            # Ensure result_of_step is a string and handle potential multi-line results
-            result_str = str(result_of_step).replace('\n', '\n      ')
-            print(f"  - Step: {step_taken}")
-            print(f"    Result: {result_str}")
+            # Result_of_step is already expected to be Markdown formatted
+            console.print(Markdown(f"- **Step:** {step_taken}\n  **Result:**\n{result_of_step if result_of_step.strip() else '*No output from this step.*'}"))
+            console.print("") # Spacer between history items
     else:
-        print("  No execution history was recorded.")
-    print("===================================")
+        console.print(Markdown("*No steps were recorded in the execution history.*"))
+    console.rule(style="bold green")
