@@ -1,10 +1,8 @@
 import logging
-import operator
-from typing import List, Optional, Callable
+from typing import Optional, Callable
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.tools import ShellTool
 from langgraph.graph import StateGraph, END
-from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
 from rich.console import Console
 from .nodes import BuddyGraphState
