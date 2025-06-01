@@ -1,10 +1,8 @@
-# buddy.py
 import os
 import argparse
 import pathlib
 from typing import TypedDict, List, Optional, Annotated
 import operator
-import traceback
 import logging
 
 from rich.console import Console
