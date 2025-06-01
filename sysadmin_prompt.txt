@@ -1,4 +1,0 @@
-My system is running a bit slow.
-1. List all files in the current directory, including hidden ones and showing details.
-2. Check the available disk space on all mounted filesystems.
-3. Show the first 5 lines of the system's message log (dmesg).

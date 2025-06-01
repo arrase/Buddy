@@ -1,2 +1,0 @@
-1. Run a command that will definitely fail, like thiscommanddoesnotexistXYZ.
-2. Try to read a non-existent file using a made-up command like read_imaginary_file /no/such/file.txt

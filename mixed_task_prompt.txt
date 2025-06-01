@@ -1,4 +1,0 @@
-Let's do a few things:
-1. What is the main purpose of the 'uname' command in Linux? (This should be a knowledge question)
-2. Display the system's kernel name and release using the 'uname' command.
-3. Print the current date and time.

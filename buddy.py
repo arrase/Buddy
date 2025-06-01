@@ -1,13 +1,11 @@
 import os # Already imported, but ensure it's used for getcwd
 import json
 import argparse
-import functools
 import sys # Added for sys.exit
 import subprocess # Added for shell tool
 from langchain.tools import Tool # Added for shell tool
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage, ToolMessage
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, List, Annotated
 from rich.console import Console # Added for Rich output
