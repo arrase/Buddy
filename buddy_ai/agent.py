@@ -12,15 +12,15 @@ from langgraph.prebuilt import create_react_agent
 # from rich.markdown import Markdown # Markdown is no longer used directly here
 from rich.console import Console # Still needed for _agent_cli_console and set_agent_console
 
-# Import the BuddyGraphState from the nodos package
-from .nodos import BuddyGraphState
+# Import the BuddyGraphState from the nodes package
+from .nodes import BuddyGraphState
 
-# Import node functions and relevant data classes from the nodos package
-from .nodos.planner import planner_node, Plan
-from .nodos.executor import executor_node
-from .nodos.replanner import replanner_node
-from .nodos.human_approval import human_approval_node
-from .nodos.deciders import should_continue_decider, decide_after_approval
+# Import node functions and relevant data classes from the nodes package
+from .nodes.planner import planner_node, Plan
+from .nodes.executor import executor_node
+from .nodes.replanner import replanner_node
+from .nodes.human_approval import human_approval_node
+from .nodes.deciders import should_continue_decider, decide_after_approval
 # Assessment is defined and used within deciders.py, not directly needed in agent.py's global scope.
 
 # Global-like variables are now managed in shared_instances.py
@@ -53,7 +53,7 @@ def create_executor_agent_runnable(llm: ChatGoogleGenerativeAI) -> Optional[Call
 def set_global_llms_and_agents(planner_llm: ChatGoogleGenerativeAI, executor_agent: Callable):
     # from . import shared_instances # Already imported at module level
     try:
-        # Plan is now imported from .nodos.planner
+        # Plan is now imported from .nodes.planner
         logging.info(f"AGENT (set_globals): shared_instances module ID: {id(shared_instances)}")
         shared_instances._planner_llm_structured = planner_llm.with_structured_output(Plan)
         logging.info(f"AGENT (set_globals): _planner_llm_structured ID: {id(shared_instances._planner_llm_structured)}")
