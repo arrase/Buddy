@@ -1,0 +1,10 @@
+Python is a high-level, interpreted programming language known for its readability and versatility.
+
+Key Features:
+- Easy to Learn: Simple syntax similar to English.
+- Interpreted: Code is executed line by line, making debugging easier.
+- Dynamically Typed: No need to declare variable types.
+- Large Standard Library: Offers a wide range of modules and functions.
+- Extensible: Can be extended with C/C++ or other languages.
+- Object-Oriented: Supports object-oriented programming principles.
+- Portable: Runs on various operating systems without modification.
