@@ -236,6 +236,8 @@ def replanner_node(state: BuddyGraphState) -> dict:
 def human_approval_node(state: BuddyGraphState) -> dict:
     logging.info("Entering human_approval_node.")
     auto_approve = state.get("auto_approve", False)
+    # Log initial state relevant to approval
+    logging.info(f"Plan approval state: auto_approve={auto_approve}, current_plan_approved={state.get('plan_approved')}, user_feedback_present={bool(state.get('user_feedback'))}")
 
     # Initialize return state keys to avoid partial updates if logic exits early
     current_plan_approved = False
@@ -252,9 +254,9 @@ def human_approval_node(state: BuddyGraphState) -> dict:
 
     # Check for critical errors in the plan itself before asking for approval
     if not plan or not isinstance(plan, list) or not plan[0] or plan[0].startswith("Critical Error:"):
-        logging.error(f"Human approval node: Critical error in plan, cannot proceed with approval. Plan: {plan}")
+        logging.warning(f"Critical error in plan detected by human_approval_node. Bypassing user interaction. Plan: {plan}")
         # This state will be caught by decide_after_approval to go to END
-        return {"plan_approved": False, "user_feedback": None, "plan": plan}
+        return {"plan_approved": False, "user_feedback": None, "plan": plan} # Ensure plan is passed through
 
 
     plan_md = "\n".join(f"{i+1}. {step}" for i, step in enumerate(plan))
@@ -280,33 +282,39 @@ def human_approval_node(state: BuddyGraphState) -> dict:
                     if feedback:
                         current_user_feedback = feedback
                         current_plan_approved = False
-                        logging.info(f"User feedback for replan: {feedback}")
+                        # logging.info(f"User feedback for replan: {feedback}") # Logged after loop breaks
                         break
                     else:
                         cli_console.print("[bold red]Feedback cannot be empty if you choose to refine. Please provide your comments or (C)ancel refinement.[/bold red]")
-                        # Allow cancelling the refinement input
                         sub_choice = cli_console.input("Enter feedback or (C)ancel refinement: ").strip().lower()
                         if sub_choice == 'c':
-                            # Effectively cancels the 'refine' choice, re-prompt A/R/C
-                            # To do this, we need to break this inner loop and continue outer
-                            current_user_feedback = None # Ensure no partial feedback
+                            current_user_feedback = None
                             break
                 except KeyboardInterrupt:
                     logging.warning("User cancelled refinement input via KeyboardInterrupt.")
-                    current_user_feedback = None # Ensure no partial feedback
-                    break # Break inner loop, will continue outer loop
-            if current_user_feedback is not None: # Feedback was successfully provided
-                break # Break outer loop
-            # If feedback was cancelled, the outer loop continues to re-ask A/R/C
+                    current_user_feedback = None
+                    break
+            if current_user_feedback is not None:
+                logging.info(f"User chose to refine. Feedback: {current_user_feedback}")
+                break
+            # If feedback was cancelled (current_user_feedback is None), the outer loop continues
 
         elif raw_input == 'c':
-            logging.info("Plan cancelled by user.")
             current_plan_approved = False
             current_user_feedback = None
+            logging.info("User cancelled plan approval.")
             break
         else:
+            logging.debug("Invalid input from user during plan approval.") # Log before print
             cli_console.print("[bold red]Invalid input. Please enter 'A', 'R', or 'C'.[/bold red]")
 
+    # Log final outcome of the node before returning
+    if current_plan_approved:
+        logging.info("Plan approved by user or auto-approved.") # This covers auto-approve path too if we reach here
+    # Refinement and cancellation already logged when they occur and break the loop.
+    # If it's an auto-approval, it returns earlier.
+
+    logging.info("Exiting human_approval_node.")
     return {"plan_approved": current_plan_approved, "user_feedback": current_user_feedback}
 
 
@@ -417,22 +425,29 @@ def create_buddy_graph() -> StateGraph:
     def decide_after_approval(state: BuddyGraphState) -> str:
         logging.info("Entering decide_after_approval.")
         plan_approved = state.get("plan_approved", False)
-        user_feedback = state.get("user_feedback")
+        user_feedback = state.get("user_feedback") # This will be the actual feedback string or None
         plan = state.get("plan", [])
 
-        if plan and plan[0].startswith("Critical Error:"):
-             logging.error(f"Critical error from planner: {plan[0]}")
-             return "END" # Or a specific error handling node
+        plan_has_critical_error = not plan or not isinstance(plan, list) or not plan[0] or plan[0].startswith("Critical Error:")
+        logging.debug(f"State for decide_after_approval: plan_approved={plan_approved}, user_feedback_present={bool(user_feedback)}, plan_has_critical_error={plan_has_critical_error})")
 
-        if plan_approved:
-            logging.info("Plan approved. Proceeding to executor.")
-            return "executor"
-        elif user_feedback: # and not plan_approved (implicit)
-            logging.info("User feedback provided. Proceeding to replanner.")
-            return "replanner"
+        next_node_name = "END" # Default to END
+
+        if plan_has_critical_error:
+             logging.error(f"Critical error in plan detected by decide_after_approval: {plan[0] if plan and isinstance(plan, list) and plan[0] else 'Plan is empty or invalid'}")
+             next_node_name = "END"
+        elif plan_approved:
+            # logging.info("Plan approved. Proceeding to executor.") # Logged before returning route
+            next_node_name = "executor"
+        elif user_feedback: # and not plan_approved (implicit from human_approval_node logic)
+            # logging.info("User feedback provided. Proceeding to replanner.") # Logged before returning route
+            next_node_name = "replanner"
         else: # Not approved, no feedback (e.g. user cancelled)
-            logging.info("Plan not approved and no feedback. Ending.")
-            return END # Or a specific "cancelled" node
+            # logging.info("Plan not approved and no feedback. Ending.") # Logged before returning route
+            next_node_name = "END"
+
+        logging.info(f"Routing from human_approval_node to: {next_node_name}")
+        return next_node_name
 
     workflow.add_conditional_edges(
         "human_approval",
