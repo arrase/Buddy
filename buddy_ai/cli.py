@@ -86,13 +86,13 @@ def main():
         if context_input_str.startswith("Error:"):
              _cli_execution_console.print(Markdown(f"**Warning:** Could not load context: {context_input_str}"))
 
-    _cli_execution_console.print(Markdown(f"# {prompt_source_msg}\n\n{prompt_input}"))
-    if context_input_str and not context_input_str.startswith("Error:"):
-        _cli_execution_console.print(Markdown(f"## Context Provided\n{context_input_str[:1000]}{'...' if len(context_input_str) > 1000 else ''}")) # Truncate long context for display
-    elif args.context and context_input_str.startswith("Error:"):
-        _cli_execution_console.print(Markdown(f"--- \n*Failed to load context from {args.context}.*"))
-    else:
-        _cli_execution_console.print(Markdown("--- \n*No context provided.*"))
+    # _cli_execution_console.print(Markdown(f"# {prompt_source_msg}\n\n{prompt_input}"))
+    # if context_input_str and not context_input_str.startswith("Error:"):
+    #     _cli_execution_console.print(Markdown(f"## Context Provided\n{context_input_str[:1000]}{'...' if len(context_input_str) > 1000 else ''}")) # Truncate long context for display
+    # elif args.context and context_input_str.startswith("Error:"):
+    #     _cli_execution_console.print(Markdown(f"--- \n*Failed to load context from {args.context}.*"))
+    # else:
+    #     _cli_execution_console.print(Markdown("--- \n*No context provided.*"))
 
     logger.info("Initializing LLMs and Agent...")
     planner_llm = create_llm_instance(planner_model_name, "Planner", api_key)
