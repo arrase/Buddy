@@ -1,4 +1,5 @@
 import logging
+import warnings
 from typing import Optional, Callable
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.tools import ShellTool
@@ -26,8 +27,14 @@ def create_llm_instance(model_name: str, llm_type: str, api_key: str) -> Optiona
 
 def create_executor_agent_runnable(llm: ChatGoogleGenerativeAI) -> Optional[Callable]:
     try:
-        executor_agent = create_react_agent(llm, tools=[ShellTool()])
-        logging.info("Executor ReAct agent created successfully with ShellTool.")
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                'ignore',
+                category=UserWarning,
+                module='langchain_community.tools.shell.tool'
+            )
+            executor_agent = create_react_agent(llm, tools=[ShellTool()])
+        logging.info("Executor ReAct agent created successfully with ShellTool (UserWarning suppressed).")
         return executor_agent
     except Exception as e:
         logging.error(f"Error creating Executor Agent: {e}", exc_info=True)
